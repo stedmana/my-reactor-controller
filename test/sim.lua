@@ -615,6 +615,73 @@ world.baseDraw = 0
 
 --endregion
 
+--region feature 6: efficiency calibration + optimize mode
+
+CONTROL_CONFIG.calibrationSettleTicks = 6
+CONTROL_CONFIG.optimizeMode = "output"
+world.baseDraw = 0
+runTicks(300) -- let band control restore the buffer into its ~50% band
+
+local bigReactor = _G.reactors["BigReactors-Reactor_0"]
+local okCal = bigReactor:startCalibration()
+check(okCal, "calibration starts when the grid is not busy")
+
+local guard = 0
+while bigReactor.calibration and guard < 500 do
+    tick = tick + 1
+    _G.__simClock = tick / 20
+    world.step()
+    __test.runLoop(tick)
+    guard = guard + 1
+end
+check(bigReactor.calibration == nil, "calibration sweep runs to completion")
+
+local pointCount = 0
+for _ in pairs(bigReactor.curve or {}) do pointCount = pointCount + 1 end
+check(pointCount == 21, "efficiency curve recorded all 21 rod steps")
+check(type(bigReactor.bestEffLevel) == "number"
+    and bigReactor.bestEffLevel >= 0 and bigReactor.bestEffLevel <= 100,
+    "best-efficiency rod level picked from the curve")
+
+local saved = ConfigUtil.readState("BigReactors-Reactor_0")
+check(saved and saved.curve and saved.bestEffLevel ~= nil, "efficiency curve persisted to state file")
+
+-- Refuse to start while the grid is busy (buffer drained below the band).
+world.baseDraw = 500000
+runTicks(200)
+local okBusy, busyReason = bigReactor:startCalibration()
+check(not okBusy, "calibration refuses while grid is busy (" .. tostring(busyReason) .. ")")
+
+-- Optimize-efficiency mode never pulls rods out past the sweet spot, even under heavy load.
+bigReactor.bestEffLevel = 60
+world.baseDraw = 500000
+CONTROL_CONFIG.optimizeMode = "efficiency"
+runTicks(300)
+check(rodAverage(reactorBig.rods) >= 55, "efficiency mode holds rods at/above the sweet spot under load")
+
+CONTROL_CONFIG.optimizeMode = "output"
+runTicks(300)
+check(rodAverage(reactorBig.rods) < 55, "output mode pulls rods below the sweet spot to chase load")
+
+-- Opt / Calib buttons.
+local optBtn = mon.touch.buttonList["Opt"]
+check(optBtn ~= nil, "Opt button exists")
+if optBtn then
+    mon:handleEvents({ "monitor_touch", mon.id, optBtn.xMin, optBtn.yMin })
+    check(CONTROL_CONFIG.optimizeMode == "efficiency", "touching Opt switches to efficiency mode")
+    mon:handleEvents({ "monitor_touch", mon.id, optBtn.xMin, optBtn.yMin })
+    check(CONTROL_CONFIG.optimizeMode == "output", "touching Opt switches back to output mode")
+end
+check(mon.touch.buttonList["Calib"] ~= nil, "Calib button exists")
+
+-- Restore defaults for the remaining tests.
+CONTROL_CONFIG.optimizeMode = "output"
+bigReactor.bestEffLevel = nil
+world.baseDraw = 0
+ConfigUtil.writeConfig("control")
+
+--endregion
+
 -- Detach/reattach shouldn't blow up.
 __test.handlePeripheralDetach("BigReactors-Turbine_5")
 tick = tick + 1; _G.__simClock = tick / 20

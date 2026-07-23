@@ -322,8 +322,50 @@ end
 
 local function updateReactorRods()
     for _, reactor in pairs(_G.reactors) do
-        reactor:updateRods()
+        -- A reactor mid-calibration owns its own rods (stepCalibration); skip normal steering.
+        if not reactor.calibration then
+            reactor:updateRods()
+        end
     end
+end
+
+-- Advance any in-progress efficiency calibrations. Runs every tick (independent of the steering
+-- interval) so each rod step is held for a real, consistent number of ticks.
+local function stepCalibrations()
+    for _, reactor in pairs(_G.reactors) do
+        if reactor.calibration then
+            reactor:stepCalibration()
+        end
+    end
+end
+
+-- Toggle output vs. efficiency optimize mode (feature 6).
+function _G.toggleOptimizeMode()
+    CONTROL_CONFIG.optimizeMode = (CONTROL_CONFIG.optimizeMode == "efficiency") and "output" or "efficiency"
+    ConfigUtil.writeConfig("control")
+end
+
+-- Start calibration on the first eligible reactor (one at a time, so the sweep never blacks out
+-- the whole grid). Returns ok, reason.
+function _G.startCalibration()
+    for _, reactor in pairs(_G.reactors) do
+        if reactor.calibration then
+            return false, "a reactor is already calibrating"
+        end
+    end
+    for _, reactor in pairs(_G.reactors) do
+        local ok = reactor:startCalibration()
+        if ok then return true end
+    end
+    return false, "no reactor eligible (grid busy?)"
+end
+
+-- True while any reactor is mid-sweep (for the UI button state).
+function _G.isCalibrating()
+    for _, reactor in pairs(_G.reactors) do
+        if reactor.calibration then return true end
+    end
+    return false
 end
 
 ---@param steer boolean false = safety-governor-only pass (between steering intervals)
@@ -395,6 +437,9 @@ local function runLoop(currentTickNumber)
     updateOverallStats()
 
     if CONTROL_CONFIG.autoMode then
+        -- Calibration sweeps step every tick (own timing), independent of the steering throttle.
+        stepCalibrations()
+
         -- Responsiveness throttle: steering runs every controlIntervalTicks; the turbine
         -- safety governor still runs every tick (inside updateControl, before steering).
         local interval = math.max(1, math.floor(CONTROL_CONFIG.controlIntervalTicks or 1))

@@ -113,6 +113,9 @@ local function drawReactorCard(mon, ox, oy, reactor)
         if gl ~= "" then badge = badge .. " " .. gl end
     end
 
+    local calProg = reactor.calibrationProgress and reactor:calibrationProgress()
+    if calProg then badge = badge .. " CAL" end
+
     drawCardFrame(mon, ox, oy, border, "R " .. shortId(reactor.id) .. "  [" .. badge .. "]")
 
     local ix, iy, iw = ox + 1, oy + 1, CARD_W - 2
@@ -132,9 +135,13 @@ local function drawReactorCard(mon, ox, oy, reactor)
     drawText(mon, string.format("%s %5.1f%%", bufLabel, bufPct), ix, iy, colors.black, colors.white)
     drawHBar(mon, ix, iy + 1, iw, bufPct, steam and colors.cyan or colors.green)
 
-    -- Control rods.
+    -- Control rods (with the calibrated efficiency sweet-spot level appended when known).
     local rod = reactor.averageRodLevel or 0
-    drawText(mon, string.format("Rods  %5.1f%%", rod), ix, iy + 3, colors.black, colors.white)
+    local rodLine = string.format("Rods  %5.1f%%", rod)
+    if reactor.bestEffLevel then
+        rodLine = string.format("Rods  %5.1f%% sweet %d", rod, reactor.bestEffLevel)
+    end
+    drawText(mon, rodLine, ix, iy + 3, colors.black, colors.white)
     drawHBar(mon, ix, iy + 4, iw, rod, colors.yellow)
 
     -- Temperatures.
@@ -142,8 +149,11 @@ local function drawReactorCard(mon, ox, oy, reactor)
         math.floor((reactor.averageCaseTemp or 0) + 0.5),
         math.floor((reactor.averageFuelTemp or 0) + 0.5)), ix, iy + 6, colors.black, colors.lightBlue)
 
-    -- Primary output.
-    if steam then
+    -- Primary output (replaced by a calibration progress readout during a sweep).
+    if calProg then
+        drawText(mon, string.format("CALIBRATING %3d%%", math.floor(calProg * 100 + 0.5)),
+            ix, iy + 8, colors.black, colors.magenta)
+    elseif steam then
         drawText(mon, "Steam " .. string.format("%5d", math.floor(reactor.averageSteamProductionRate + 0.5)) .. " mB/t",
             ix, iy + 8, colors.black, colors.cyan)
     else
@@ -269,6 +279,8 @@ local function drawHeader(mon, width, page, pages)
     drawText(mon, string.format("Buf %d-%d", cfg.bufferMin, cfg.bufferMax), 18, 6, colors.gray, colors.white)
     drawText(mon, string.format("Coil %d-%d", cfg.coilsOnBelowPct, cfg.coilsOffAbovePct), 34, 6, colors.gray, colors.white)
     drawText(mon, string.format("Tick %d", cfg.controlIntervalTicks or 1), 50, 6, colors.gray, colors.white)
+    local optColor = (cfg.optimizeMode == "efficiency") and colors.lime or colors.white
+    drawText(mon, "Opt " .. (cfg.optimizeMode == "efficiency" and "eff" or "out"), 58, 6, colors.gray, optColor)
 end
 
 --endregion
@@ -333,6 +345,8 @@ local Monitor = {
             setTurbines(_G.turbinesOn)
         end, 22, by, 30, by, colors.red, colors.lime)
         self:tryAddButton("Fly", function() toggleFlywheel() end, 32, by, 40, by, colors.gray, colors.magenta)
+        self:tryAddButton("Opt", function() toggleOptimizeMode() end, 42, by, 50, by, colors.gray, colors.lime)
+        self:tryAddButton("Calib", function() startCalibration() end, 52, by, 60, by, colors.gray, colors.orange)
 
         if w >= 54 then
             self:tryAddButton("Prev", function() self.page = math.max(1, self.page - 1) end,
@@ -359,6 +373,8 @@ local Monitor = {
         if self.buttons["Rctrs"] then self.touch:setButton("Rctrs", _G.btnOn) end
         if self.buttons["Turbs"] then self.touch:setButton("Turbs", _G.turbinesOn ~= false) end
         if self.buttons["Fly"] then self.touch:setButton("Fly", CONTROL_CONFIG.flywheelMode == true) end
+        if self.buttons["Opt"] then self.touch:setButton("Opt", CONTROL_CONFIG.optimizeMode == "efficiency") end
+        if self.buttons["Calib"] then self.touch:setButton("Calib", isCalibrating()) end
     end,
 
     draw = function(self)

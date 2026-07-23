@@ -10,7 +10,7 @@ sketch how it fits the current architecture.
 | 3 | Reactor↔turbine steam network mapping | Medium | **Implemented** (2026-07) |
 | 4 | Configurable ideal RPM (e.g. 900) | Low | **Implemented** (2026-07) |
 | 5 | Flywheel mode (overspeed idle turbines) | Medium | **Implemented** (2026-07) |
-| 6 | Efficiency calibration + optimize mode | High | planned |
+| 6 | Efficiency calibration + optimize mode | High | **Implemented** (2026-07) |
 
 ---
 
@@ -81,33 +81,27 @@ by engaging the coils and burning off stored rotational energy.
   logic (spin-up, ceiling cap, brake-on-demand, clean disarm) but NOT the in-game damage
   model. Use at your own risk.
 
-## 6. Efficiency measurement + optimize mode
+## 6. Efficiency measurement + optimize mode — IMPLEMENTED
 
-Measure each setup's efficiency (mB of fuel per RF generated) and add a setting to choose
-between **maximize efficiency** and **maximize output**.
+Measure each setup's efficiency and add a setting to choose between **maximize efficiency** and
+**maximize output**.
 
-Sketch of the calibration routine:
+- **Calibration sweep** (`reactor.lua` `startCalibration`/`stepCalibration`/`finishCalibration`):
+  drives the rods across 0..100% in 5% steps, holds each step `calibrationSettleTicks` (default
+  40) so output/fuel settle, and records the operating point. Passive reactors log RF/t per fuel
+  B/t; active reactors log steam mB/t per fuel B/t. The result is an efficiency curve plus the
+  single most-efficient rod level, persisted to `/state/<id>.state.conf` and reloaded on connect.
+- **Optimize mode** (`optimizeMode` = `output` | `efficiency`): efficiency mode never lets the
+  rod PID pull rods out past the calibrated best-efficiency level, trading peak output for fuel
+  economy; output mode is the original demand-following behavior. (Producing less is never a
+  safety concern, so the clamp is always upward.)
+- **UI:** `Opt` header button toggles the mode (shown as `Opt eff`/`Opt out`); `Calib` starts a
+  sweep on the first eligible reactor (one at a time so a sweep can't black out the grid). The
+  reactor card shows `CAL nn%` progress during a sweep and the `sweet NN` rod level once known.
+- **Refuses when busy:** a sweep won't start if the grid buffer is below its band floor (or, for
+  active reactors, if any turbine is generating), since the sweep drops that reactor's output to
+  zero partway through.
 
-- Passive reactors: sweep control-rod insertion in 5% steps, wait for output to stabilize
-  after each jump, record RF/t and fuel mB/t at each step -> efficiency curve
-  (`getFuelConsumedLastTick` + `getEnergyProducedLastTick` give both numbers directly).
-- Active (steam) reactors: same sweep, but record steam mB/t per fuel mB/t, and also how
-  many turbines the steam output at that step can effectively run (steam / per-turbine
-  full-load draw).
-- Linked turbines: attribute fuel cost through the steam network — turbine efficiency =
-  RF/t out per fuel mB/t of the reactors producing its steam (needs feature #3 groups to
-  attribute correctly).
-- Store curves per entity (config/state file); "optimize efficiency" mode then picks the
-  rod-level operating point from the curve instead of pure demand-following, while
-  "maximize output" keeps today's behavior.
-
-Open questions / feasibility notes:
-
-- Multi-reactor shared steam networks muddy attribution (which reactor's fuel made the steam
-  a given turbine ate?). Pro-rating by each reactor's share of steam production is probably
-  good enough.
-- Calibration takes real time (stabilization wait per step x 20 steps) — needs a UI flow:
-  explicit "calibrate" button per reactor, progress display, and it should refuse to run
-  while demand is high.
-- Reactor efficiency also drifts with fuel reactivity/fertility; curves may need occasional
-  re-calibration.
+Not yet done (future refinement): per-turbine fuel attribution through the steam network
+(RF/t out per fuel B/t of its group's reactors) for a turbine-level efficiency readout, and
+automatic re-calibration as fuel reactivity/fertility drifts.

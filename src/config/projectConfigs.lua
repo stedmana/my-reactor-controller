@@ -61,6 +61,15 @@ _G.CONTROL_CONFIG = {
     flywheelMode = false,
     flywheelCeilingRPM = 0,     -- 0 = uncapped; >0 = hard cut at this RPM while armed+idle
 
+    -- Efficiency optimize mode (feature 6).
+    --   "output"     : demand-following, maximum output (original behavior).
+    --   "efficiency" : never pull rods out past the calibrated best-efficiency point, so a
+    --                  reactor trades peak output for fuel efficiency (needs a stored curve).
+    optimizeMode = "output",
+    -- Ticks to hold each rod step during a calibration sweep so output/fuel readings settle
+    -- before they're recorded (sweep = 21 steps of 0..100% in 5% increments).
+    calibrationSettleTicks = 40,
+
     -- Rolling-average window (seconds) for all smoothed stats.
     secondsToAverage = 0.5,
 }

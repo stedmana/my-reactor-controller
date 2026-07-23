@@ -56,6 +56,13 @@ local function lerp(start, finish, t)
     return (1 - t) * start + t * finish
 end
 
+-- Rod-insertion levels a calibration sweep visits: 0, 5, 10, ... 100 (21 steps).
+local function buildSweepLevels()
+    local levels = {}
+    for level = 0, 100, 5 do levels[#levels + 1] = level end
+    return levels
+end
+
 -- One PID step -> rod level 0..100.
 -- Gains are NEGATIVE because rod insertion is inversely related to output:
 -- positive error (want MORE output) must push the rod level DOWN.
@@ -266,6 +273,14 @@ local Reactor = {
         local combinedError = W_RFT * errorRFT + W_RF * errorRF
         local rftRodLevel = iteratePID(self.pid, combinedError)
 
+        -- Optimize-efficiency mode (feature 6): never pull rods OUT past the calibrated
+        -- best-efficiency point. Higher rod level = deeper insertion = the reactor refuses to
+        -- over-drive for extra output, trading peak output for fuel efficiency. Producing less
+        -- is never a safety concern, so this only ever clamps the level upward.
+        if CONTROL_CONFIG.optimizeMode == "efficiency" and self.bestEffLevel then
+            rftRodLevel = math.max(rftRodLevel, self.bestEffLevel)
+        end
+
         -- Rod write threshold (server-lag reduction): skip the peripheral write when the
         -- level barely moved. Edges (0/100) always write so full-off/full-on land exactly.
         local threshold = CONTROL_CONFIG.rodWriteThreshold or 0
@@ -276,6 +291,107 @@ local Reactor = {
         end
         self.setRodLevels(rftRodLevel)
         self.lastWrittenRodLevel = rftRodLevel
+    end,
+
+    -- Efficiency calibration (feature 6). A sweep drives the rods across 0..100% in 5% steps,
+    -- holds each step long enough for output/fuel to settle, and records the operating point.
+    -- The result is an efficiency curve (RF/t per fuel B/t for passive reactors, steam mB/t per
+    -- fuel B/t for active) plus the single most-efficient rod level, persisted to the state file
+    -- and used by optimize-efficiency mode. Stepped once per tick by the controller while active.
+
+    -- Begin a sweep. Refuses when the grid is busy (calibration deliberately starves output) so
+    -- it can't black out a loaded network. Returns ok, reason.
+    ---@param self Reactor
+    startCalibration = function(self)
+        if self.calibration then
+            return false, "already calibrating"
+        end
+        -- Refuse when the grid can't spare this reactor: buffer below the band floor means
+        -- something is already drawing hard, and a sweep drops this reactor's output to zero.
+        local s = _G.overallStats
+        local gridPct = (s.capacity > 0) and (s.storedThisTick / s.capacity * 100) or 0
+        local floor = CONTROL_CONFIG.bufferMin or 30
+        if gridPct < floor then
+            return false, "grid buffer below band (busy)"
+        end
+        if self.activelyCooled then
+            for _, turbine in pairs(_G.turbines) do
+                if turbine.coilsEngaged then
+                    return false, "turbines generating"
+                end
+            end
+        end
+        self.calibration = {
+            levels = buildSweepLevels(),
+            idx = 1,
+            waited = 0,
+            settleTicks = CONTROL_CONFIG.calibrationSettleTicks or 40,
+            curve = {},
+        }
+        return true
+    end,
+
+    -- Advance the sweep by one tick. Sets the step's rod level once, waits settleTicks, then
+    -- records the settled averages and moves to the next step.
+    ---@param self Reactor
+    stepCalibration = function(self)
+        local cal = self.calibration
+        if not cal then return end
+        if not self.active then
+            self.setActive(true)
+            self.active = true
+        end
+
+        local level = cal.levels[cal.idx]
+        if cal.waited == 0 then
+            self.setRodLevels(level)
+        end
+        cal.waited = cal.waited + 1
+
+        if cal.waited >= cal.settleTicks then
+            local fuel = self.averageFuelUsage
+            local out = self.activelyCooled and self.averageSteamProductionRate or self.averageLastRFT
+            cal.curve[level] = {
+                out = out,
+                fuel = fuel,
+                rft = self.averageLastRFT,
+                steam = self.averageSteamProductionRate,
+                eff = (fuel > 0) and (out / fuel) or 0,
+            }
+            cal.idx = cal.idx + 1
+            cal.waited = 0
+            if cal.idx > #cal.levels then
+                self:finishCalibration()
+            end
+        end
+    end,
+
+    -- Pick the most-efficient rod level (max output-per-fuel among steps that produce output),
+    -- stash the curve on the instance, persist it, and leave calibration.
+    ---@param self Reactor
+    finishCalibration = function(self)
+        local cal = self.calibration
+        local bestLevel, bestEff = nil, -1
+        for level, point in pairs(cal.curve) do
+            if point.out and point.out > 0 and point.eff > bestEff then
+                bestEff = point.eff
+                bestLevel = level
+            end
+        end
+        self.curve = cal.curve
+        self.bestEffLevel = bestLevel
+        self.bestEff = bestEff
+        self.calibration = nil
+        if _G.ConfigUtil then
+            ConfigUtil.writeState(self.id, { curve = self.curve, bestEffLevel = bestLevel, bestEff = bestEff })
+        end
+    end,
+
+    -- Sweep progress 0..1, or nil when not calibrating (for the UI).
+    ---@param self Reactor
+    calibrationProgress = function(self)
+        if not self.calibration then return nil end
+        return (self.calibration.idx - 1) / #self.calibration.levels
     end,
 }
 
@@ -327,6 +443,17 @@ local function newExtremeReactor(id)
         setRodLevels = function (level) setRods(extremeReactor, level) end,
     }
 	setmetatable(reactorInstance, {__index = Reactor})
+
+    -- Restore a previously calibrated efficiency curve, if one was saved for this reactor.
+    if _G.ConfigUtil then
+        local saved = ConfigUtil.readState(id)
+        if saved and saved.curve then
+            reactorInstance.curve = saved.curve
+            reactorInstance.bestEffLevel = saved.bestEffLevel
+            reactorInstance.bestEff = saved.bestEff
+        end
+    end
+
     -- Prime all stats/averages immediately so consumers never see nil fields.
     local currentTickNumber = math.floor(os.clock() * 20)
     reactorInstance:update(currentTickNumber)

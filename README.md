@@ -36,6 +36,8 @@ Uses the Extreme Reactors **Modernized Object API** (`getEnergyStats()`, `getFue
   matches only its own steam demand; defaults to one shared network.
 - **Flywheel mode (optional, off by default):** spin idle turbines past 2000 RPM to bank
   rotational energy for instant spike response — ⚠️ overspeed can destroy turbines in-game.
+- **Efficiency calibration + optimize mode:** measure each reactor's output-vs-fuel curve with a
+  rod sweep, then run at the fuel-efficient sweet spot instead of chasing maximum output.
 
 ## Installing in Minecraft
 
@@ -84,7 +86,22 @@ to `/defaults/control.default.conf` with user changes in `/overrides/control.ove
 | `steamGroups` | `{}` | Steam network groups (`{ reactors={ids}, turbines={ids} }`); empty = one shared network |
 | `flywheelMode` | `false` | Spin idle turbines past 2000 RPM at full steam for instant spike response (⚠️ overspeed — see below) |
 | `flywheelCeilingRPM` | 0 | Optional flywheel RPM cap; `0` = uncapped (spin as high as possible) |
+| `optimizeMode` | `"output"` | `"output"` (max output) or `"efficiency"` (hold rods at the calibrated sweet spot) |
+| `calibrationSettleTicks` | 40 | Ticks held per rod step during an efficiency sweep |
 | `secondsToAverage` | 0.5 | Rolling-average window for smoothed stats |
+
+### Efficiency calibration + optimize mode
+
+Press `Calib` to run an efficiency sweep on the first eligible reactor: it steps the control
+rods across 0→100% in 5% increments, lets each step settle, and records output vs. fuel to build
+an efficiency curve (saved to `/state/<id>.state.conf`, reloaded on reboot). The card shows
+`CAL nn%` while sweeping and the `sweet NN` rod level once measured. A sweep refuses to start if
+the grid buffer is below its band (or a turbine is generating, for steam reactors), since it
+drops that reactor's output to zero mid-sweep.
+
+`Opt` toggles `optimizeMode`: **efficiency** never pulls a reactor's rods out past its measured
+sweet spot (trading peak output for fuel economy); **output** is the default demand-following
+behavior.
 
 ### Steam network groups
 

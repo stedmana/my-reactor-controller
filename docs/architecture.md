@@ -115,6 +115,12 @@ One instance per reactor. `update()` reads all stats once per tick into rolling 
 - `setRods()` achieves **fractional** insertion by setting some rods 1% deeper than others.
 - PID gains are **negative** (insertion is inversely related to output).
 - The buffer error is normalized to per-mille of capacity so gains transfer across sizes.
+- **Efficiency calibration** (`startCalibration`/`stepCalibration`/`finishCalibration`): a rod
+  sweep (0..100% in 5% steps, `calibrationSettleTicks` per step) builds an output-vs-fuel curve
+  and the best-efficiency rod level, persisted to the state file and reloaded on connect. The
+  controller steps an active sweep every tick and skips normal steering for that reactor.
+- **Optimize mode**: when `optimizeMode == "efficiency"`, `updateRods` clamps the rod level up to
+  `bestEffLevel` so the reactor never over-drives past its calibrated sweet spot.
 
 ### src/classes/turbine.lua
 One instance per turbine. `update()` mirrors the reactor pattern; `updateControl(config)` is
@@ -132,10 +138,12 @@ battery, per turbine buffer, and per generic `energy_storage` peripheral. The la
 deltas are what make the `rfLost` derivation work.
 
 ### src/classes/monitor.lua
-Card-grid UI. Header (aggregates + Auto/Rctrs/Turbs/Prev/Next buttons via Touchpoint, plus a
-settings row: idleRPM ±100, buffer band ±5%/side, coil band ±5%/side — all persisted), then
-one card per reactor (mode badge, buffer/rod bars, temps, output) and per turbine (RPM gauge
-with 1800 target line + 2000 redline, power, steam in/cap, coil state, own-buffer bar).
+Card-grid UI. Header (aggregates + Auto/Rctrs/Turbs/Fly/Opt/Calib/Prev/Next buttons via
+Touchpoint, plus a settings row: idleRPM ±100, buffer band ±5%/side, coil band ±5%/side,
+control-interval ±1 — all persisted, plus optimize-mode label), then one card per reactor (mode
+badge, group badge, buffer/rod bars with sweet-spot, temps, output or calibration progress) and
+per turbine (RPM gauge — rescales for flywheel — power, steam in/cap, coil/flywheel state,
+own-buffer bar).
 Layout flows to monitor size (0.5 text scale) and pages on overflow. Buttons are added with
 `pcall` so small monitors degrade instead of erroring. Rendering goes through an off-screen
 `window` (`setVisible(false)` … `(true)`) to avoid flicker.
