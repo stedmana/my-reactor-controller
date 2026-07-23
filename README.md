@@ -33,22 +33,27 @@ Uses the Extreme Reactors **Modernized Object API** (`getEnergyStats()`, `getFue
 - **Server-lag throttle:** steering can run every N ticks with deadbands on RPM error and rod
   writes; the safety governor always runs at full tick rate.
 
-## Install
+## Installing in Minecraft
 
-1. Advanced Computer wired (wired modems, **activated**) to every reactor/turbine computer port
-   and an Advanced Monitor (big — e.g. 8x6 for 3 reactors + 5 turbines; monitor renders at
-   0.5 text scale).
-2. On the computer:
+On the Advanced Computer, run:
 
-   ```
-   wget run https://raw.githubusercontent.com/stedmana/my-reactor-controller/main/install.lua
-   ```
+```
+wget run https://raw.githubusercontent.com/stedmana/my-reactor-controller/main/install.lua
+```
 
-   The installer pulls the live file list from GitHub (no manifest), downloads `src/` +
-   `startup.lua`, and offers to reboot. Re-run it any time to update.
+The installer pulls the live file list from GitHub (no manifest), downloads `src/` +
+`startup.lua`, and offers to reboot. **Re-run the same command any time to update** to the
+latest version.
 
-   (Manual alternative: copy this folder's `src/` and `startup.lua` to the computer root,
-   then reboot.)
+Setup checklist first:
+
+1. **Advanced Computer** connected via wired modems (right-click each modem to **activate** —
+   it turns red) to every reactor/turbine **computer port**.
+2. **Advanced Monitor** on the same wired network (big — e.g. 8x6 for 3 reactors + 5
+   turbines; the UI renders at 0.5 text scale).
+
+Manual alternative: copy this repo's `src/` and `startup.lua` to the computer root, then
+reboot.
 
 Turbines are left in whatever **vent mode** they're already in — for a closed loop keep them on
 "Do not vent" so water returns to the reactors.
