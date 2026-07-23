@@ -1,0 +1,349 @@
+-- Controller orchestration: peripheral registry, tick loop, aggregate stats, and the
+-- per-tick control passes for reactors (rods) and turbines (steam PID + coils + safety).
+
+---@type table<string, Monitor>
+_G.monitors = {}
+---@type table<string, Reactor>
+_G.reactors = {}
+---@type table<string, Turbine>
+_G.turbines = {}
+---@type table<string, EnergyBuffer>
+_G.energyBuffers = {}
+
+-- Master on/off states (mapped to the monitor's control buttons).
+_G.btnOn = true        -- reactors
+_G.turbinesOn = true   -- turbines
+
+-- Aggregate stats, recomputed every tick. Smoothed values are used where available.
+---@class OverallStats
+_G.overallStats = {
+    storedLastTick = 0,
+    storedThisTick = 0,
+    capacity = 1,
+
+    lastRFT = 0,          -- passive reactor RF generation (drives rfLost feedback)
+    turbineRFT = 0,       -- turbine RF generation
+    totalRFT = 0,         -- lastRFT + turbineRFT (display)
+    rfLost = 0,           -- grid drain (display)
+    rfLostPerReactor = 0, -- per passive-reactor control target
+
+    fuelUsage = 0,
+    waste = 0,
+
+    steamProductionRate = 0,
+    storedSteam = 0,
+    steamCapacity = 0,
+    steamConsumedLastTick = 0,     -- total turbine steam draw (display)
+    steamConsumedPerReactor = 0,   -- per active-reactor control target
+
+    passiveReactorCount = 0,
+    activeReactorCount = 0,
+    turbineCount = 0,
+
+    efficiency = function()
+        if _G.overallStats.fuelUsage <= 0 then return 0 end
+        return _G.overallStats.totalRFT / _G.overallStats.fuelUsage
+    end,
+}
+
+_G.selectedReactor = nil
+
+local function updateOverallStats()
+    local s = _G.overallStats
+
+    -- Aggregate energy buffer = every internal RF buffer on the net (passive reactors + turbines).
+    s.storedLastTick = 0
+    s.storedThisTick = 0
+    s.capacity = 0
+    for _, buffer in pairs(_G.energyBuffers) do
+        s.storedLastTick = s.storedLastTick + buffer.averageEnergyStoredLastTick
+        s.storedThisTick = s.storedThisTick + buffer.averageEnergyStoredThisTick
+        s.capacity = s.capacity + buffer.capacity
+    end
+    if s.capacity <= 0 then s.capacity = 1 end
+
+    s.fuelUsage = 0
+    s.waste = 0
+    s.lastRFT = 0
+    s.steamProductionRate = 0
+    s.storedSteam = 0
+    s.steamCapacity = 0
+    s.passiveReactorCount = 0
+    s.activeReactorCount = 0
+
+    for _, reactor in pairs(_G.reactors) do
+        if reactor.activelyCooled then
+            s.activeReactorCount = s.activeReactorCount + 1
+            s.steamProductionRate = s.steamProductionRate + reactor.averageSteamProductionRate
+            s.storedSteam = s.storedSteam + reactor.averageStoredSteam
+            s.steamCapacity = s.steamCapacity + reactor.steamCapacity
+        else
+            s.passiveReactorCount = s.passiveReactorCount + 1
+            s.lastRFT = s.lastRFT + reactor.averageLastRFT
+        end
+        s.fuelUsage = s.fuelUsage + reactor.averageFuelUsage
+        s.waste = s.waste + reactor.waste
+    end
+
+    -- Turbines: RF generation (display) and actual steam consumption (cascade to steam reactors).
+    s.turbineRFT = 0
+    s.steamConsumedLastTick = 0
+    s.turbineCount = 0
+    for _, turbine in pairs(_G.turbines) do
+        s.turbineCount = s.turbineCount + 1
+        s.turbineRFT = s.turbineRFT + turbine.averageEnergyProduced
+        s.steamConsumedLastTick = s.steamConsumedLastTick + turbine.averageSteamFlow
+    end
+
+    s.totalRFT = s.lastRFT + s.turbineRFT
+
+    -- Grid drain: passive generation +/- the aggregate buffer delta (turbine RF shows up here
+    -- through the buffer delta, so passive reactors idle down when turbines already cover the load).
+    s.rfLost = math.floor(s.lastRFT + s.storedLastTick - s.storedThisTick + 0.5)
+
+    s.rfLostPerReactor = s.rfLost / math.max(1, s.passiveReactorCount)
+    s.steamConsumedPerReactor = s.steamConsumedLastTick / math.max(1, s.activeReactorCount)
+end
+
+-- Keep the legacy globals the monitor/PID code reads in sync with the config band.
+local function syncConfigGlobals()
+    _G.SECONDS_TO_AVERAGE = CONTROL_CONFIG.secondsToAverage or 0.5
+    _G.minb = CONTROL_CONFIG.bufferMin
+    _G.maxb = CONTROL_CONFIG.bufferMax
+end
+
+---@param monitorID string
+local function connectMonitor(monitorID)
+    print("Monitor " .. monitorID .. " connected!")
+    _G.monitors[monitorID] = Monitor.new(monitorID)
+end
+
+---@param reactorID string
+local function connectExtremeReactor(reactorID)
+    print("Extreme Reactor " .. reactorID .. " connected!")
+    _G.reactors[reactorID] = Reactor.newExtremeReactor(reactorID)
+    _G.reactors[reactorID].setActive(_G.btnOn)
+    _G.selectedReactor = _G.reactors[reactorID]
+    -- The reactor's internal battery is part of the grid buffer.
+    _G.energyBuffers[reactorID] = EnergyBuffer.newReactorEnergyBuffer(reactorID)
+end
+
+---@param turbineID string
+local function connectExtremeTurbine(turbineID)
+    print("Extreme Turbine " .. turbineID .. " connected!")
+    _G.turbines[turbineID] = Turbine.newExtremeTurbine(turbineID)
+    -- The turbine's internal battery is also part of the grid buffer.
+    _G.energyBuffers[turbineID] = EnergyBuffer.newReactorEnergyBuffer(turbineID)
+end
+
+---@param energyBufferID string
+local function connectForgeEnergyBuffer(energyBufferID)
+    print("Energy Buffer " .. energyBufferID .. " connected!")
+    _G.energyBuffers[energyBufferID] = EnergyBuffer.newForgeEnergyBuffer(energyBufferID)
+end
+
+local function firePeripheralAttachEventForAllPeripherals()
+    for _, id in pairs(peripheral.getNames()) do
+        os.queueEvent("peripheral", id)
+    end
+end
+
+---@param currentTickNumber number
+local function updateEnergyBuffers(currentTickNumber)
+    for _, energyBuffer in pairs(_G.energyBuffers) do
+        energyBuffer:update(currentTickNumber)
+    end
+end
+
+---@param currentTickNumber number
+local function updateReactors(currentTickNumber)
+    for _, reactor in pairs(_G.reactors) do
+        reactor:update(currentTickNumber)
+    end
+end
+
+---@param currentTickNumber number
+local function updateTurbines(currentTickNumber)
+    for _, turbine in pairs(_G.turbines) do
+        turbine:update(currentTickNumber)
+    end
+end
+
+function _G.setReactors(active)
+    _G.btnOn = active
+    for _, reactor in pairs(_G.reactors) do
+        reactor.setActive(active)
+    end
+end
+
+function _G.setTurbines(active)
+    _G.turbinesOn = active
+    for _, turbine in pairs(_G.turbines) do
+        turbine:setActive(active)
+    end
+end
+
+function _G.toggleAutoMode()
+    CONTROL_CONFIG.autoMode = not CONTROL_CONFIG.autoMode
+    ConfigUtil.writeConfig("control")
+end
+
+local function updateReactorRods()
+    for _, reactor in pairs(_G.reactors) do
+        reactor:updateRods()
+    end
+end
+
+local function controlTurbines()
+    for _, turbine in pairs(_G.turbines) do
+        turbine:updateControl(CONTROL_CONFIG)
+    end
+end
+
+---@param peripheralID string
+local function handlePeripheralDetach(peripheralID)
+    if _G.monitors[peripheralID] ~= nil then
+        print("Monitor " .. peripheralID .. " disconnected!")
+        _G.monitors[peripheralID] = nil
+    end
+    if _G.energyBuffers[peripheralID] ~= nil then
+        _G.energyBuffers[peripheralID] = nil
+    end
+    if _G.reactors[peripheralID] ~= nil then
+        print("Reactor " .. peripheralID .. " disconnected!")
+        _G.reactors[peripheralID] = nil
+        if _G.selectedReactor and _G.selectedReactor.id == peripheralID then
+            _G.selectedReactor = next(_G.reactors) and _G.reactors[next(_G.reactors)] or nil
+        end
+    end
+    if _G.turbines[peripheralID] ~= nil then
+        print("Turbine " .. peripheralID .. " disconnected!")
+        _G.turbines[peripheralID] = nil
+    end
+end
+
+-- Extreme Reactors 2 (MC 1.20.1) reports these CC peripheral types.
+local REACTOR_TYPES = {
+    ["BigReactors-Reactor"] = true,
+    ["extremereactor-reactorComputerPort"] = true,
+}
+local TURBINE_TYPES = {
+    ["BigReactors-Turbine"] = true,
+    ["extremereactor-turbineComputerPort"] = true,
+}
+
+---@param peripheralID string
+---@param peripheralType string
+local function handlePeripheralAttach(peripheralID, peripheralType)
+    if peripheralType == "monitor" then
+        connectMonitor(peripheralID)
+    elseif REACTOR_TYPES[peripheralType] then
+        connectExtremeReactor(peripheralID)
+    elseif TURBINE_TYPES[peripheralType] then
+        connectExtremeTurbine(peripheralID)
+    elseif peripheralType == "energy_storage" then
+        connectForgeEnergyBuffer(peripheralID)
+    else
+        print("Ignoring peripheral", peripheralID, "of type", peripheralType)
+    end
+end
+
+local function redrawMonitors()
+    for _, monitor in pairs(_G.monitors) do
+        monitor:draw()
+    end
+end
+
+_G.TICKS_TO_REDRAW = 2
+local function runLoop(currentTickNumber)
+    updateEnergyBuffers(currentTickNumber)
+    updateReactors(currentTickNumber)
+    updateTurbines(currentTickNumber)
+    updateOverallStats()
+
+    if CONTROL_CONFIG.autoMode then
+        updateReactorRods()
+        controlTurbines()
+    end
+
+    if currentTickNumber % _G.TICKS_TO_REDRAW == 0 then
+        redrawMonitors()
+    end
+end
+
+local function eventListener()
+    while true do
+        local event = { os.pullEvent() }
+
+        if event[1] == "monitor_touch" or event[1] == "monitor_resize" then
+            local monitor = _G.monitors[event[2]]
+            if monitor ~= nil then
+                monitor:handleEvents(event)
+            end
+        elseif event[1] == "peripheral" then
+            handlePeripheralAttach(event[2], peripheral.getType(event[2]))
+        elseif event[1] == "peripheral_detach" then
+            handlePeripheralDetach(event[2])
+        end
+    end
+end
+
+local function loop()
+    local loopEventName = "yield"
+    local curTime = math.floor(os.clock() * 20)
+    local lastTime = curTime
+
+    os.sleep(0)
+    while true do
+        curTime = math.floor(os.clock() * 20)
+
+        local hasDevices = next(_G.reactors) ~= nil or next(_G.turbines) ~= nil
+        if not hasDevices then
+            print("No reactor or turbine detected! Waiting for a connection...")
+            sleep(1)
+        elseif curTime < lastTime + 1 then
+            os.queueEvent(loopEventName)
+            os.pullEvent(loopEventName)
+        elseif curTime > lastTime + 1 then
+            print("Missed last", curTime - lastTime - 1, "tick(s)!", curTime)
+            runLoop(curTime)
+        else
+            local t = os.epoch("utc")
+            while os.epoch("utc") - t < 2 do
+                os.queueEvent(loopEventName)
+                os.pullEvent(loopEventName)
+            end
+            runLoop(curTime)
+            os.sleep(0)
+        end
+        lastTime = curTime
+    end
+end
+
+-- Exposed for the headless simulator in test/ (harmless in-game).
+_G.__test = {
+    runLoop = runLoop,
+    updateOverallStats = updateOverallStats,
+    handlePeripheralAttach = handlePeripheralAttach,
+    handlePeripheralDetach = handlePeripheralDetach,
+    syncConfigGlobals = syncConfigGlobals,
+}
+
+--Entry point
+function _G.main()
+    term.setBackgroundColor(colors.black)
+    term.clear()
+    term.setCursorPos(1, 1)
+
+    syncConfigGlobals()
+
+    _G.monitors = {}
+    _G.reactors = {}
+    _G.turbines = {}
+    _G.energyBuffers = {}
+
+    -- Manually fire "peripheral" for everything already connected so registries populate.
+    firePeripheralAttachEventForAllPeripherals()
+
+    parallel.waitForAll(loop, eventListener)
+end

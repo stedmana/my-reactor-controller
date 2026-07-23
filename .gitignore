@@ -1,0 +1,5 @@
+# ComputerCraft runtime state (created on the CC computer, not in repo)
+defaults/
+overrides/
+state/
+.DS_Store
