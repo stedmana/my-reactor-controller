@@ -82,8 +82,8 @@ to `/defaults/control.default.conf` with user changes in `/overrides/control.ove
 | `rodWriteThreshold` | 0 | Min rod-level change (%-points) before writing new levels |
 | `entityOverrides` | `{}` | Per-peripheral overrides: reactors `bufferMin`/`bufferMax`, turbines `coilsOnBelowPct`/`coilsOffAbovePct`/`idleRPM` |
 | `steamGroups` | `{}` | Steam network groups (`{ reactors={ids}, turbines={ids} }`); empty = one shared network |
-| `flywheelMode` | `false` | Spin idle turbines to `flywheelRPM` for instant spike response (⚠️ overspeed — see below) |
-| `flywheelRPM` / `flywheelCeilingRPM` | 2500 / 2800 | Flywheel target and raised safety ceiling (RPM) |
+| `flywheelMode` | `false` | Spin idle turbines past 2000 RPM at full steam for instant spike response (⚠️ overspeed — see below) |
+| `flywheelCeilingRPM` | 0 | Optional flywheel RPM cap; `0` = uncapped (spin as high as possible) |
 | `secondsToAverage` | 0.5 | Rolling-average window for smoothed stats |
 
 ### Steam network groups
@@ -103,14 +103,16 @@ groups are active.
 
 ### ⚠️ Flywheel mode (overspeed — off by default)
 
-The `Fly` button arms flywheel mode: **idle** turbines spin up to `flywheelRPM` (default 2500,
-above the normal 2000 ceiling) so a sudden power spike can be served instantly by engaging the
-coils and dumping the stored rotational energy. When coils engage the normal 2000 ceiling snaps
-back and the turbine brakes down through the band.
+The `Fly` button arms flywheel mode: **idle** turbines run at full steam and climb as high as
+the turbine physically allows (uncapped by default), banking rotational energy so a sudden power
+spike can be served instantly by engaging the coils and dumping it. When coils engage the normal
+2000 ceiling snaps back and the turbine brakes down through the band. Set `flywheelCeilingRPM`
+to a positive value to hard-cap the spin-up instead of running uncapped.
 
-**Running an ER2 turbine above 2000 RPM can make it EXPLODE.** This mode deliberately defeats
-the normal 2000 RPM safety guarantee, and the in-game high-RPM damage behavior is *not*
-verified — use it at your own risk. The header shows a red warning while armed.
+**Running an ER2 turbine above 2000 RPM can make it EXPLODE, and uncapped flywheel has no upper
+limit.** This mode deliberately defeats the normal 2000 RPM safety guarantee, and the in-game
+high-RPM damage behavior is *not* verified — use it at your own risk. The header shows a red
+warning while armed.
 
 The monitor's settings row adjusts `idleRPM` (±100, clamped to stay ≥100 RPM under `safeRPM`),
 the reactor buffer band, the turbine coil band (±5% per side, min 10% width), and the steering

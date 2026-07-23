@@ -67,15 +67,15 @@ Allow changing the "ideal" RPM target — e.g. 900 RPM instead of 1800.
 Toggle: idle turbines spin up to very high RPM so a big power spike can be served instantly
 by engaging the coils and burning off stored rotational energy.
 
-- Config: `flywheelMode` (off by default), `flywheelRPM` (2500), `flywheelCeilingRPM` (2800).
-- While armed AND a turbine is idle (coils disengaged), its steam PI targets `flywheelRPM`
-  and the safety governor's ceiling is raised to `flywheelCeilingRPM`. The instant coils are
+- Config: `flywheelMode` (off by default), `flywheelCeilingRPM` (0 = uncapped).
+- While armed AND a turbine is idle (coils disengaged), it runs at FULL steam and the safety
+  governor's ceiling is lifted — uncapped by default, so the rotor climbs as high as it
+  physically can; a positive `flywheelCeilingRPM` hard-caps it instead. The instant coils are
   demanded (power needed) the normal 2000 ceiling snaps back and the governor brakes the
   overspeed off into the grid — exactly the "burn stored rotational energy" behavior.
-- Armed via the `Fly` header button (`toggleFlywheel`). `flywheelRPM` is clamped above
-  `ceilingRPM` and under `flywheelCeilingRPM` (`clampFlywheelRPM`).
-- UI: turbine gauge rescales to `flywheelCeilingRPM` with a magenta `FLYWHEEL @N` indicator;
-  the header shows a red armed/EXPLODE warning banner.
+- Armed via the `Fly` header button (`toggleFlywheel`).
+- UI: turbine gauge rescales past 2000 (dynamically when uncapped) with a magenta `FLYWHEEL`
+  indicator and the 2000 line marked; the header shows a red armed/EXPLODE warning banner.
 - ⚠️ **Still unverified in-game:** running a turbine above 2000 RPM may damage or destroy it.
   This mode deliberately defeats the normal 2000 RPM guarantee. Simulator confirms the control
   logic (spin-up, ceiling cap, brake-on-demand, clean disarm) but NOT the in-game damage

@@ -60,12 +60,13 @@ The governor also ignores `controlIntervalTicks`: when the steering pass is thro
 every N ticks (server-lag reduction), the governor still runs on every tick.
 
 **Flywheel mode** raises the governor's own thresholds. While `flywheelMode` is armed and a
-turbine is idle (coils not demanded), `ceiling`/`safe` become `flywheelCeilingRPM` and its
-soft-brake band, so the rotor may store energy above 2000 RPM. The moment coils are demanded
-the thresholds snap back to 2000/1950 and the governor brakes the overspeed off into the grid.
-The steam PI targets `flywheelRPM` only in the armed-idle state. This deliberately defeats the
-2000 RPM guarantee (in-game turbines can explode) — the simulator verifies the control logic,
-not the damage model.
+turbine is idle (coils not demanded) it runs at full steam; the governor `ceiling`/`safe`
+become `flywheelCeilingRPM` and its soft-brake band, or are lifted to infinity when
+`flywheelCeilingRPM == 0` (uncapped default) so the rotor climbs as high as it physically can.
+The moment coils are demanded the thresholds snap back to 2000/1950 and the governor brakes the
+overspeed off into the grid. This deliberately defeats the 2000 RPM guarantee (in-game turbines
+can explode; uncapped has no upper limit) — the simulator verifies the control logic, not the
+damage model.
 
 ### Steam network groups
 

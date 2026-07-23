@@ -161,15 +161,22 @@ local function drawTurbineCard(mon, ox, oy, turbine)
     local cfg = CONTROL_CONFIG
     local rpm = turbine.rpm or 0
 
-    -- Flywheel (feature 5): while armed AND idle the gauge rescales to flywheelCeilingRPM and
-    -- the target line jumps to flywheelRPM, matching the raised governor ceiling in the control
-    -- law. Otherwise the normal 1800/2000 gauge (per-turbine idleRPM override honored).
+    -- Flywheel (feature 5): while armed AND idle the gauge rescales past 2000 and the white
+    -- line marks the 2000 danger threshold. A capped run scales to flywheelCeilingRPM; an
+    -- uncapped run (cap 0) scales dynamically to the current RPM so the bar never pins at full.
+    -- Otherwise the normal 1800/2000 gauge (per-turbine idleRPM override honored).
     local armedIdle = (cfg.flywheelMode == true) and (turbine.desiredCoils == false)
     local gaugeCeiling, gaugeSafe, target
     if armedIdle then
-        gaugeCeiling = cfg.flywheelCeilingRPM
-        gaugeSafe = cfg.flywheelCeilingRPM - (cfg.ceilingRPM - cfg.safeRPM)
-        target = clampFlywheelRPM(cfg.flywheelRPM)
+        local cap = cfg.flywheelCeilingRPM or 0
+        if cap > 0 then
+            gaugeCeiling = cap
+        else
+            -- Uncapped: round the scale up past the current RPM so there's always headroom.
+            gaugeCeiling = math.max(cfg.ceilingRPM * 2, math.ceil((rpm + 1) / 500) * 500)
+        end
+        gaugeSafe = cfg.ceilingRPM               -- fill turns red once past the 2000 redline
+        target = cfg.ceilingRPM                  -- white line marks the 2000 danger threshold
     else
         gaugeCeiling = cfg.ceilingRPM
         gaugeSafe = cfg.safeRPM
@@ -177,12 +184,12 @@ local function drawTurbineCard(mon, ox, oy, turbine)
     end
 
     local border = colors.green
-    if rpm >= gaugeCeiling then
+    if armedIdle then
+        border = rpm >= cfg.ceilingRPM and colors.red or colors.magenta
+    elseif rpm >= gaugeCeiling then
         border = colors.red
     elseif rpm >= gaugeSafe then
         border = colors.orange
-    elseif armedIdle then
-        border = colors.magenta
     end
 
     local title = "T " .. shortId(turbine.id)
@@ -198,7 +205,12 @@ local function drawTurbineCard(mon, ox, oy, turbine)
 
     -- RPM gauge (the marquee visual).
     drawRPMGauge(mon, ix, iy + 1, iw, rpm, target, gaugeSafe, gaugeCeiling)
-    drawText(mon, "target " .. target .. "  max " .. gaugeCeiling, ix, iy + 2, colors.black, colors.lightGray)
+    if armedIdle then
+        local capText = (cfg.flywheelCeilingRPM or 0) > 0 and tostring(cfg.flywheelCeilingRPM) or "uncapped"
+        drawText(mon, "FLYWHEEL  cap " .. capText, ix, iy + 2, colors.black, colors.magenta)
+    else
+        drawText(mon, "target " .. target .. "  max " .. gaugeCeiling, ix, iy + 2, colors.black, colors.lightGray)
+    end
 
     -- Power out.
     drawText(mon, "Power " .. fmt(turbine.averageEnergyProduced) .. " RF/t", ix, iy + 4, colors.black, colors.green)
@@ -211,7 +223,7 @@ local function drawTurbineCard(mon, ox, oy, turbine)
     if turbine.coilsEngaged then
         drawText(mon, "Coils: GENERATING", ix, iy + 7, colors.black, colors.lime)
     elseif armedIdle then
-        drawText(mon, "FLYWHEEL  @" .. target, ix, iy + 7, colors.black, colors.magenta)
+        drawText(mon, string.format("FLYWHEEL spin %d", math.floor(rpm + 0.5)), ix, iy + 7, colors.black, colors.magenta)
     else
         drawText(mon, "Coils: idle @" .. target, ix, iy + 7, colors.black, colors.lightGray)
     end

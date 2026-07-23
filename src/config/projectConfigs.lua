@@ -47,18 +47,19 @@ _G.CONTROL_CONFIG = {
     --   }
     steamGroups = {},
 
-    -- Flywheel mode (OFF by default). When armed, IDLE turbines (coils disengaged) spin up to
-    -- flywheelRPM so a sudden power spike can be served instantly by engaging the coils and
-    -- burning off the stored rotational energy. The safety governor's ceiling is raised to
-    -- flywheelCeilingRPM WHILE a turbine is armed+idle; the moment its coils engage, the normal
-    -- 2000 RPM ceiling snaps back and the turbine brakes down through the band.
+    -- Flywheel mode (OFF by default). When armed, IDLE turbines (coils disengaged) run at FULL
+    -- steam and climb as high as the turbine physically allows, banking rotational energy so a
+    -- sudden power spike can be served instantly: the moment the coils engage, the normal 2000
+    -- RPM ceiling snaps back and the governor brakes the overspeed off into the grid.
     --
-    --   !!! WARNING: running a turbine above 2000 RPM can make it EXPLODE in-game. !!!
-    --   This mode deliberately defeats the normal 2000 RPM safety guarantee. Behavior at high
-    --   RPM (damage threshold / efficiency) is NOT verified in-game - use at your own risk.
+    -- flywheelCeilingRPM is an OPTIONAL software cap while armed+idle: 0 (default) = uncapped
+    -- (spin as high as possible); any positive value hard-cuts the rotor at that RPM instead.
+    --
+    --   !!! WARNING: running a turbine above 2000 RPM can make it EXPLODE in-game, and uncapped
+    --   flywheel has NO upper RPM limit. This mode deliberately defeats the 2000 RPM safety
+    --   guarantee; high-RPM behavior is NOT verified in-game - use at your own risk. !!!
     flywheelMode = false,
-    flywheelRPM = 2500,         -- PI target for armed idle turbines (must exceed safeRPM)
-    flywheelCeilingRPM = 2800,  -- hard cut while armed+idle (must exceed ceilingRPM)
+    flywheelCeilingRPM = 0,     -- 0 = uncapped; >0 = hard cut at this RPM while armed+idle
 
     -- Rolling-average window (seconds) for all smoothed stats.
     secondsToAverage = 0.5,

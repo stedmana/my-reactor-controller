@@ -209,14 +209,6 @@ function _G.clampIdleRPM(rpm)
     return math.max(IDLE_RPM_FLOOR, math.min(rpm, CONTROL_CONFIG.safeRPM - IDLE_RPM_MARGIN))
 end
 
--- Flywheel target must sit ABOVE the normal ceiling (that's the point) yet leave headroom
--- under flywheelCeilingRPM so the flywheel soft-brake band has room to work.
-local FLYWHEEL_RPM_MARGIN = 100
-function _G.clampFlywheelRPM(rpm)
-    return math.max(CONTROL_CONFIG.ceilingRPM,
-        math.min(rpm, CONTROL_CONFIG.flywheelCeilingRPM - FLYWHEEL_RPM_MARGIN))
-end
-
 function _G.toggleFlywheel()
     CONTROL_CONFIG.flywheelMode = not CONTROL_CONFIG.flywheelMode
     ConfigUtil.writeConfig("control")

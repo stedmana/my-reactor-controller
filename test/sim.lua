@@ -552,17 +552,30 @@ local function stepOnly(n)
     end
 end
 
+-- Uncapped (default): idle turbines keep climbing well past 2000.
 CONTROL_CONFIG.flywheelMode = true
+CONTROL_CONFIG.flywheelCeilingRPM = 0
 world.baseDraw = 0
-stepOnly(800)
-
-local anyOver2000, allUnderCeiling = false, true
+stepOnly(400)
+local midRpm = world.fakeTurbines[1].rpm
+stepOnly(400)
+local anyOver2000, keptClimbing = false, false
 for _, t in ipairs(world.fakeTurbines) do
     if t.rpm > CEILING then anyOver2000 = true end
-    if t.rpm > CONTROL_CONFIG.flywheelCeilingRPM + 60 then allUnderCeiling = false end
 end
-check(anyOver2000, "flywheel: idle turbines spin above 2000 RPM when armed")
-check(allUnderCeiling, "flywheel: overspeed still capped at flywheelCeilingRPM")
+keptClimbing = world.fakeTurbines[1].rpm > midRpm + 50
+check(anyOver2000, "flywheel uncapped: idle turbines spin well above 2000 RPM")
+check(keptClimbing, "flywheel uncapped: RPM keeps climbing (no software ceiling)")
+
+-- Optional cap: a positive flywheelCeilingRPM hard-limits the spin-up.
+CONTROL_CONFIG.flywheelCeilingRPM = 2800
+stepOnly(1200)
+local underCap = true
+for _, t in ipairs(world.fakeTurbines) do
+    if t.rpm > CONTROL_CONFIG.flywheelCeilingRPM + 60 then underCap = false end
+end
+check(underCap, "flywheel capped: positive flywheelCeilingRPM limits the overspeed")
+CONTROL_CONFIG.flywheelCeilingRPM = 0
 
 -- Big spike: coils must engage and the overspeed must brake back under 2000.
 world.baseDraw = 300000
