@@ -75,8 +75,8 @@ to `/defaults/control.default.conf` with user changes in `/overrides/control.ove
 | `secondsToAverage` | 0.5 | Rolling-average window for smoothed stats |
 
 The monitor's settings row adjusts `idleRPM` (±100, clamped to stay ≥100 RPM under `safeRPM`),
-the reactor buffer band, and the turbine coil band (±5% per side, min 10% width) live; changes
-persist to the overrides file.
+the reactor buffer band, the turbine coil band (±5% per side, min 10% width), and the steering
+interval (`Tick -/+`, 1-20 ticks) live; changes persist to the overrides file.
 
 Per-reactor rod-PID gains live in [src/classes/reactor.lua](src/classes/reactor.lua)
 (`newExtremeReactor`); the stock gains are the upstream project's and behave sanely for large and

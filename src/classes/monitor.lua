@@ -219,6 +219,7 @@ local function drawHeader(mon, width, page, pages)
     drawText(mon, string.format("RPM %d", cfg.idleRPM), 2, 6, colors.gray, colors.white)
     drawText(mon, string.format("Buf %d-%d", cfg.bufferMin, cfg.bufferMax), 18, 6, colors.gray, colors.white)
     drawText(mon, string.format("Coil %d-%d", cfg.coilsOnBelowPct, cfg.coilsOffAbovePct), 34, 6, colors.gray, colors.white)
+    drawText(mon, string.format("Tick %d", cfg.controlIntervalTicks or 1), 50, 6, colors.gray, colors.white)
 end
 
 --endregion
@@ -299,6 +300,8 @@ local Monitor = {
         self:tryAddButton("Buf+", function() adjustBufferBand(5) end, 26, sy, 32, sy, colors.gray, colors.blue)
         self:tryAddButton("Coil-", function() adjustCoilBand(-5) end, 34, sy, 40, sy, colors.gray, colors.blue)
         self:tryAddButton("Coil+", function() adjustCoilBand(5) end, 42, sy, 48, sy, colors.gray, colors.blue)
+        self:tryAddButton("Tick-", function() adjustControlInterval(-1) end, 50, sy, 56, sy, colors.gray, colors.blue)
+        self:tryAddButton("Tick+", function() adjustControlInterval(1) end, 58, sy, 64, sy, colors.gray, colors.blue)
     end,
 
     updateButtonStates = function(self)

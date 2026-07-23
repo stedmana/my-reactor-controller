@@ -486,6 +486,16 @@ CONTROL_CONFIG.rpmDeadband = 0
 CONTROL_CONFIG.rodWriteThreshold = 0
 reactorBig.methods.setControlRodsLevels = origSetRods
 
+-- Tick -/+ buttons adjust controlIntervalTicks, clamped to [1, 20].
+local tickMinus = mon.touch.buttonList["Tick-"]
+check(tickMinus ~= nil and mon.touch.buttonList["Tick+"] ~= nil, "Tick-/Tick+ buttons exist")
+adjustControlInterval(-100)
+check(CONTROL_CONFIG.controlIntervalTicks == 1, "control interval clamps at 1")
+adjustControlInterval(100)
+check(CONTROL_CONFIG.controlIntervalTicks == 20, "control interval clamps at 20")
+CONTROL_CONFIG.controlIntervalTicks = 1
+ConfigUtil.writeConfig("control")
+
 -- Settings-row buttons on the monitor drive the adjusters (1800 +100 clamps to 1850).
 local rpmPlus = mon.touch.buttonList["RPM+"]
 check(rpmPlus ~= nil, "settings buttons exist (RPM+)")

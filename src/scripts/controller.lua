@@ -164,6 +164,13 @@ end
 function _G.adjustBufferBand(delta) adjustBand("bufferMin", "bufferMax", delta) end
 function _G.adjustCoilBand(delta) adjustBand("coilsOnBelowPct", "coilsOffAbovePct", delta) end
 
+-- Steering interval (server-lag throttle), 1..20 ticks. Governor is unaffected.
+function _G.adjustControlInterval(delta)
+    local current = CONTROL_CONFIG.controlIntervalTicks or 1
+    CONTROL_CONFIG.controlIntervalTicks = math.max(1, math.min(20, current + delta))
+    ConfigUtil.writeConfig("control")
+end
+
 ---@param monitorID string
 local function connectMonitor(monitorID)
     print("Monitor " .. monitorID .. " connected!")
