@@ -1,3 +1,13 @@
+-- Touchpoint: third-party monitor button library (Lyqyd, MIT; lightly modified upstream).
+-- Used by monitor.lua for the clickable header buttons. Key API:
+--   Touchpoint.new(id, mon)                        -> instance bound to a monitor/window
+--   :add(name, func, x1, y1, x2, y2, off, on)      -> register a button (errors on overlap
+--                                                     or out-of-bounds - callers pcall this)
+--   :handleEvents(...)                             -> translate monitor_touch into
+--                                                     ("button_click", id, name)
+--   :setButton(name, state) / :drawAllButtons()    -> reflect state / redraw
+-- Left as-is beyond this header; treat as vendored code.
+
 local version = "1.01"
 --[[
 The MIT License (MIT)

@@ -1,4 +1,12 @@
 
+-- Config persistence with a defaults/overrides split:
+--   /defaults/<id>.default.conf   - the shipped defaults, rewritten every boot
+--   /overrides/<id>.override.conf - only the keys the user changed from default
+--   /state/<id>.state.conf        - free-form runtime state (writeState/readState)
+-- readConfig() layers defaults then overrides onto the live table; writeConfig() diffs the
+-- live table against defaults and stores just the difference (deleting the override file
+-- when nothing differs). This keeps user tweaks intact across updates that change defaults.
+
 local CONFIGS = {}
 CONFIGS["control"] = CONTROL_CONFIG
 

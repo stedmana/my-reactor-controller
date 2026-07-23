@@ -1,5 +1,14 @@
 -- Controller orchestration: peripheral registry, tick loop, aggregate stats, and the
 -- per-tick control passes for reactors (rods) and turbines (steam PID + coils + safety).
+--
+-- Per game tick (20/s), runLoop():
+--   1. update every EnergyBuffer, Reactor, Turbine (read peripherals, refresh averages)
+--   2. updateOverallStats()  - aggregate grid energy, steam production/consumption, shares
+--   3. if autoMode: reactor rod PIDs + turbine control laws
+--   4. every TICKS_TO_REDRAW ticks: redraw all monitors
+--
+-- Concurrently, eventListener() reacts to monitor touches/resizes and peripheral
+-- attach/detach, so devices can be (un)plugged live without restarting.
 
 ---@type table<string, Monitor>
 _G.monitors = {}
@@ -288,6 +297,14 @@ local function eventListener()
     end
 end
 
+-- Game-tick-synchronized driver (inherited from upstream, subtle but effective):
+-- os.clock() advances in 0.05s steps, so floor(os.clock()*20) is the current game tick.
+-- queueEvent+pullEvent of a dummy event is a zero-sleep yield - it spins the coroutine
+-- without losing the rest of the current tick (os.sleep would always round up to a tick).
+--   * same tick as last run  -> yield and re-check
+--   * exactly one tick later -> busy-yield ~2ms into the fresh tick (so peripherals have
+--     settled), then run the control pass
+--   * more than one tick     -> we lagged; run immediately and note the miss
 local function loop()
     local loopEventName = "yield"
     local curTime = math.floor(os.clock() * 20)

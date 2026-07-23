@@ -18,7 +18,6 @@ local MODULES = {
     "src/classes/vector2.lua",
     "src/classes/deque.lua",
     "src/util/draw.lua",
-    "src/classes/pid.lua",
     "src/classes/touchpoint.lua",
     "src/classes/energybuffer.lua",
     "src/classes/reactor.lua",

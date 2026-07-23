@@ -256,6 +256,9 @@ local Monitor = {
         self.buttons = {}
         self.page = self.page or 1
 
+        -- Grid layout: how many CARD_W x CARD_H cards (plus GAP) fit beside/below the header.
+        -- Cards flow left-to-right then top-to-bottom; anything beyond cols*rows goes to the
+        -- next page (Prev/Next buttons).
         local w, h = self.size.x, self.size.y
         self.cols = math.max(0, math.floor((w - 1) / (CARD_W + GAP)))
         local availH = h - HEADER_H

@@ -1,3 +1,8 @@
+-- EnergyBuffer: one RF store on the network, tracked tick-to-tick so the controller can
+-- aggregate "grid" state. Instances exist for every passive reactor battery, every turbine
+-- internal buffer, and any generic Forge energy_storage peripheral. The last-tick vs
+-- this-tick pair is what lets the controller derive the grid drain (rfLost) from deltas.
+
 ---@class EnergyBuffer
 ---@field id string
 ---@field energyStoredLastTick number

@@ -1,3 +1,7 @@
+-- Double-ended queue with a running sum, used as a fixed-length rolling window for
+-- smoothed stats: push new samples with pushleft, evict old ones with popright, and
+-- read average() in O(1). Every entity keeps one Deque per smoothed stat.
+
 ---@class Deque
 ---@field first number
 ---@field last number

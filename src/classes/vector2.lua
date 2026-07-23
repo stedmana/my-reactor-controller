@@ -1,3 +1,6 @@
+-- Thin 2D wrapper over CC's built-in `vector` API (which supplies +, -, * metamethods).
+-- Used for all screen coordinates/sizes in the drawing code.
+
 ---@class Vector2
 local Vector2 = {
     ---@type number
