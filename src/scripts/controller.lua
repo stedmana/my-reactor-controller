@@ -121,6 +121,49 @@ local function syncConfigGlobals()
     _G.maxb = CONTROL_CONFIG.bufferMax
 end
 
+-- Effective setting for one entity: per-entity override if present, else the global value.
+-- See entityOverrides in projectConfigs.lua for which keys each entity kind honors.
+---@param entityID string peripheral id
+---@param key string CONTROL_CONFIG key
+function _G.getEntitySetting(entityID, key)
+    local overrides = CONTROL_CONFIG.entityOverrides
+    local entity = overrides and overrides[entityID]
+    if entity and entity[key] ~= nil then
+        return entity[key]
+    end
+    return CONTROL_CONFIG[key]
+end
+
+-- idleRPM must stay well under safeRPM so normal steering never brushes the governor.
+local IDLE_RPM_MARGIN = 100
+local IDLE_RPM_FLOOR = 100
+function _G.clampIdleRPM(rpm)
+    return math.max(IDLE_RPM_FLOOR, math.min(rpm, CONTROL_CONFIG.safeRPM - IDLE_RPM_MARGIN))
+end
+
+-- UI adjusters (monitor settings row). Each validates, persists, and re-syncs globals.
+
+function _G.adjustIdleRPM(delta)
+    CONTROL_CONFIG.idleRPM = _G.clampIdleRPM(CONTROL_CONFIG.idleRPM + delta)
+    ConfigUtil.writeConfig("control")
+end
+
+-- Widen (+delta) or narrow (-delta) a [min,max] band symmetrically, keeping it sane.
+local function adjustBand(minKey, maxKey, delta)
+    local newMin = math.max(0, math.min(CONTROL_CONFIG[minKey] - delta, 100))
+    local newMax = math.max(0, math.min(CONTROL_CONFIG[maxKey] + delta, 100))
+    if newMax - newMin < 10 then -- too tight -> control law flaps; refuse
+        return
+    end
+    CONTROL_CONFIG[minKey] = newMin
+    CONTROL_CONFIG[maxKey] = newMax
+    syncConfigGlobals()
+    ConfigUtil.writeConfig("control")
+end
+
+function _G.adjustBufferBand(delta) adjustBand("bufferMin", "bufferMax", delta) end
+function _G.adjustCoilBand(delta) adjustBand("coilsOnBelowPct", "coilsOffAbovePct", delta) end
+
 ---@param monitorID string
 local function connectMonitor(monitorID)
     print("Monitor " .. monitorID .. " connected!")
@@ -203,9 +246,10 @@ local function updateReactorRods()
     end
 end
 
-local function controlTurbines()
+---@param steer boolean false = safety-governor-only pass (between steering intervals)
+local function controlTurbines(steer)
     for _, turbine in pairs(_G.turbines) do
-        turbine:updateControl(CONTROL_CONFIG)
+        turbine:updateControl(CONTROL_CONFIG, steer)
     end
 end
 
@@ -271,8 +315,14 @@ local function runLoop(currentTickNumber)
     updateOverallStats()
 
     if CONTROL_CONFIG.autoMode then
-        updateReactorRods()
-        controlTurbines()
+        -- Responsiveness throttle: steering runs every controlIntervalTicks; the turbine
+        -- safety governor still runs every tick (inside updateControl, before steering).
+        local interval = math.max(1, math.floor(CONTROL_CONFIG.controlIntervalTicks or 1))
+        local steer = (currentTickNumber % interval == 0)
+        if steer then
+            updateReactorRods()
+        end
+        controlTurbines(steer)
     end
 
     if currentTickNumber % _G.TICKS_TO_REDRAW == 0 then

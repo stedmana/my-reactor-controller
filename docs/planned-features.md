@@ -1,41 +1,42 @@
 # Planned Features
 
-Ideas queued for future versions, roughly in the order they came up. Nothing here is
-implemented yet; notes under each item sketch how it would fit the current architecture.
+Ideas queued for future versions, roughly in the order they came up. Notes under each item
+sketch how it fits the current architecture.
 
-| # | Feature | Complexity | Notes |
-| - | ------- | ---------- | ----- |
-| 1 | Configurable battery-reserve bands | Low | extends existing config |
-| 2 | Responsiveness / server-lag throttle | Low | control-interval + deadband settings |
-| 3 | Reactor↔turbine steam network mapping | Medium | per-group steam cascade |
-| 4 | Configurable ideal RPM (e.g. 900) | Low | already a config key; needs UI + validation |
-| 5 | Flywheel mode (overspeed idle turbines) | Medium | interacts with the safety governor |
-| 6 | Efficiency calibration + optimize mode | High | automated rod-sweep measurement |
+| # | Feature | Complexity | Status |
+| - | ------- | ---------- | ------ |
+| 1 | Configurable battery-reserve bands | Low | **Implemented** (2026-07) |
+| 2 | Responsiveness / server-lag throttle | Low | **Implemented** (2026-07) |
+| 3 | Reactor↔turbine steam network mapping | Medium | planned |
+| 4 | Configurable ideal RPM (e.g. 900) | Low | **Implemented** (2026-07) |
+| 5 | Flywheel mode (overspeed idle turbines) | Medium | planned |
+| 6 | Efficiency calibration + optimize mode | High | planned |
 
 ---
 
-## 1. Configurable battery-reserve bands
+## 1. Configurable battery-reserve bands — IMPLEMENTED
 
 Control the allowed range for the battery reserves of turbines and reactors, which in turn
 determines how frequently they adjust.
 
-- Today: global `bufferMin`/`bufferMax` (reactors) and `coilsOnBelowPct`/`coilsOffAbovePct`
-  (turbines) in `CONTROL_CONFIG`.
-- Planned: expose these on the monitor UI, and allow **per-entity overrides** so e.g. one
-  turbine can run a tight band (fast cycling, steady output) while others run wide bands
-  (slow cycling, less churn).
+- Global bands adjustable from the monitor settings row: `Buf -/+` widens/narrows
+  `bufferMin`/`bufferMax` and `Coil -/+` widens/narrows `coilsOnBelowPct`/`coilsOffAbovePct`,
+  5% per side per touch, refusing to collapse below 10% width. Persisted as overrides.
+- **Per-entity overrides** via `CONTROL_CONFIG.entityOverrides` (config file): reactors honor
+  `bufferMin`/`bufferMax`, turbines honor `coilsOnBelowPct`/`coilsOffAbovePct`.
 - Wider band = fewer coil flips / rod moves = fewer peripheral writes.
 
-## 2. Responsiveness setting (server-lag reduction)
+## 2. Responsiveness setting (server-lag reduction) — IMPLEMENTED
 
 A setting for how responsive power sources are to changing demand — make control rods and
 turbine flow adjust less frequently to reduce the chance of lagging the server.
 
-- Add `controlIntervalTicks` (run the control pass every N ticks instead of every tick) and
-  a **deadband** (ignore errors smaller than X RPM / X mB/t / X% buffer).
-- `steamWriteThreshold` already exists for turbine flow writes; extend the same idea to rod
-  writes (`rodWriteThreshold`, min % change before pushing new levels).
-- Safety governor stays at full tick rate regardless — only the *steering* slows down.
+- `controlIntervalTicks` runs the steering pass (rod PID, coils, steam PI) every N ticks.
+- `rpmDeadband` zeroes steam-PI errors smaller than N RPM.
+- `rodWriteThreshold` skips rod writes moving less than N %-points (edges 0/100 always write),
+  mirroring the existing `steamWriteThreshold` for turbine flow.
+- Safety governor still runs at full tick rate — only the *steering* slows down (verified in
+  the simulator with an induced overspeed on a non-steering tick).
 
 ## 3. Steam network mapping (reactor ↔ turbine groups)
 
@@ -51,14 +52,15 @@ for changing steam production.
 - Default stays "one big network" when no groups are defined.
 - UI: show group id on reactor/turbine cards.
 
-## 4. Configurable ideal RPM
+## 4. Configurable ideal RPM — IMPLEMENTED
 
 Allow changing the "ideal" RPM target — e.g. 900 RPM instead of 1800.
 
-- `idleRPM` is already a config key; the steam PI targets whatever it says.
-- Needed: monitor UI to change it, validation (must stay well under `safeRPM`), and the
-  turbine-card gauge target line already draws from config so it follows automatically.
-- Could be per-turbine (different turbines tuned to different sweet spots).
+- Monitor settings row: `RPM -/+` steps global `idleRPM` by 100, clamped to
+  `[100, safeRPM - 100]` (validation lives in `clampIdleRPM`, applied both in the UI and in
+  the turbine control law so a hand-edited config can't defeat it).
+- Per-turbine targets via `entityOverrides` (e.g. `{ ["BigReactors-Turbine_2"] = { idleRPM = 900 } }`);
+  the turbine-card gauge target line and "idle @N" text follow the effective per-turbine value.
 
 ## 5. Flywheel mode (high-RPM idle spin-up) — **off by default**
 

@@ -26,6 +26,18 @@ _G.CONTROL_CONFIG = {
     -- Only push a new steam-flow cap to a turbine when it moves at least this many mB/t (cut peripheral spam).
     steamWriteThreshold = 5,
 
+    -- Responsiveness / server-lag throttle. The safety governor ALWAYS runs at full tick
+    -- rate; these only slow down the steering (rod PID, coil hysteresis, steam PI).
+    controlIntervalTicks = 1, -- run the steering pass every N game ticks (1 = every tick)
+    rpmDeadband = 0,          -- ignore steam-PI RPM errors smaller than this (RPM)
+    rodWriteThreshold = 0,    -- min rod-level change (%-points) before pushing new levels
+
+    -- Per-entity overrides of the global settings above, keyed by peripheral id, e.g.
+    --   entityOverrides = { ["BigReactors-Turbine_2"] = { idleRPM = 900 } }
+    -- Reactors honor: bufferMin, bufferMax.
+    -- Turbines honor: coilsOnBelowPct, coilsOffAbovePct, idleRPM.
+    entityOverrides = {},
+
     -- Rolling-average window (seconds) for all smoothed stats.
     secondsToAverage = 0.5,
 }

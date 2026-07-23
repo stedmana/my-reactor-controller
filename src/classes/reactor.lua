@@ -225,8 +225,12 @@ local Reactor = {
             return
         end
 
-        local diffb = _G.maxb - _G.minb          -- band width, percent
-        local minRF = _G.minb / 100 * capacity   -- band floor, absolute
+        -- Per-reactor band overrides (entityOverrides), falling back to the global band.
+        local minb = getEntitySetting(self.id, "bufferMin") or _G.minb
+        local maxb = getEntitySetting(self.id, "bufferMax") or _G.maxb
+
+        local diffb = maxb - minb                -- band width, percent
+        local minRF = minb / 100 * capacity      -- band floor, absolute
         local diffRF = diffb / 100 * capacity    -- band width, absolute
         local diffr = diffb / 100                -- band width, fraction of capacity
         -- Seek the middle of the target band; the weighting below blends toward pure
@@ -252,7 +256,16 @@ local Reactor = {
         local combinedError = W_RFT * errorRFT + W_RF * errorRF
         local rftRodLevel = iteratePID(self.pid, combinedError)
 
+        -- Rod write threshold (server-lag reduction): skip the peripheral write when the
+        -- level barely moved. Edges (0/100) always write so full-off/full-on land exactly.
+        local threshold = CONTROL_CONFIG.rodWriteThreshold or 0
+        local forceEdge = (rftRodLevel <= 0 or rftRodLevel >= 100)
+        if self.lastWrittenRodLevel ~= nil and not forceEdge
+            and math.abs(rftRodLevel - self.lastWrittenRodLevel) < threshold then
+            return
+        end
         self.setRodLevels(rftRodLevel)
+        self.lastWrittenRodLevel = rftRodLevel
     end,
 }
 

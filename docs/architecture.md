@@ -56,6 +56,19 @@ Runs first in every control pass, on **instantaneous** RPM (not the smoothed ave
 The governor ignores the PI entirely, so a mistuned PI cannot push a turbine past the
 ceiling. Verified in the simulator including induced 1990/2005 RPM overspeed states.
 
+The governor also ignores `controlIntervalTicks`: when the steering pass is throttled to
+every N ticks (server-lag reduction), the governor still runs on every tick.
+
+### Per-entity overrides + responsiveness
+
+`CONTROL_CONFIG.entityOverrides[peripheralID]` overrides selected globals per entity
+(reactors: `bufferMin`/`bufferMax`; turbines: `coilsOnBelowPct`/`coilsOffAbovePct`/`idleRPM`),
+resolved through `_G.getEntitySetting`. `idleRPM` is always clamped to
+`[100, safeRPM - 100]` (`_G.clampIdleRPM`) so no target can brush the governor.
+Responsiveness knobs: `controlIntervalTicks` (steering every N ticks), `rpmDeadband`
+(ignore small steam-PI errors), `rodWriteThreshold` (skip small rod writes, mirroring
+`steamWriteThreshold`).
+
 ### Grid drain derivation (why turbines "just work" with passive reactors)
 
 `rfLost = passiveGeneration + storedLastTick - storedThisTick`, where `stored*` sums **all**
@@ -102,7 +115,8 @@ battery, per turbine buffer, and per generic `energy_storage` peripheral. The la
 deltas are what make the `rfLost` derivation work.
 
 ### src/classes/monitor.lua
-Card-grid UI. Header (aggregates + Auto/Rctrs/Turbs/Prev/Next buttons via Touchpoint), then
+Card-grid UI. Header (aggregates + Auto/Rctrs/Turbs/Prev/Next buttons via Touchpoint, plus a
+settings row: idleRPM ±100, buffer band ±5%/side, coil band ±5%/side — all persisted), then
 one card per reactor (mode badge, buffer/rod bars, temps, output) and per turbine (RPM gauge
 with 1800 target line + 2000 redline, power, steam in/cap, coil state, own-buffer bar).
 Layout flows to monitor size (0.5 text scale) and pages on overflow. Buttons are added with

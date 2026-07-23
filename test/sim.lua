@@ -415,6 +415,91 @@ if autoBtn then
     check(CONTROL_CONFIG.autoMode == before, "touching Auto again restores auto mode")
 end
 
+--region planned features: reserve bands, responsiveness throttle, configurable idleRPM
+
+-- idleRPM validation: UI adjuster clamps to [floor, safeRPM - margin].
+local savedIdle = CONTROL_CONFIG.idleRPM
+adjustIdleRPM(100000)
+check(CONTROL_CONFIG.idleRPM <= SAFE - 100, "idleRPM adjust clamps under safeRPM")
+adjustIdleRPM(-100000)
+check(CONTROL_CONFIG.idleRPM >= 100, "idleRPM adjust clamps at floor")
+CONTROL_CONFIG.idleRPM = savedIdle
+ConfigUtil.writeConfig("control")
+
+-- Band adjusters: widen/narrow symmetrically, refuse to collapse below 10% width.
+local bMin, bMax = CONTROL_CONFIG.bufferMin, CONTROL_CONFIG.bufferMax
+adjustBufferBand(5)
+check(CONTROL_CONFIG.bufferMin == bMin - 5 and CONTROL_CONFIG.bufferMax == bMax + 5
+    and _G.minb == bMin - 5, "buffer band widens and re-syncs globals")
+adjustBufferBand(-5)
+check(CONTROL_CONFIG.bufferMin == bMin and CONTROL_CONFIG.bufferMax == bMax, "buffer band narrows back")
+for _ = 1, 20 do adjustCoilBand(-5) end
+check(CONTROL_CONFIG.coilsOffAbovePct - CONTROL_CONFIG.coilsOnBelowPct >= 10,
+    "coil band refuses to collapse below 10% width")
+CONTROL_CONFIG.coilsOnBelowPct, CONTROL_CONFIG.coilsOffAbovePct = 30, 70
+ConfigUtil.writeConfig("control")
+
+-- Per-turbine idleRPM override + responsiveness throttle, end to end:
+-- turbine 2 targets 900 RPM while steering runs every 3rd tick with deadbands active.
+CONTROL_CONFIG.entityOverrides["BigReactors-Turbine_2"] = { idleRPM = 900 }
+CONTROL_CONFIG.controlIntervalTicks = 3
+CONTROL_CONFIG.rpmDeadband = 15
+CONTROL_CONFIG.rodWriteThreshold = 0.5
+
+local rodWrites = 0
+local origSetRods = reactorBig.methods.setControlRodsLevels
+reactorBig.methods.setControlRodsLevels = function(levels)
+    rodWrites = rodWrites + 1
+    return origSetRods(levels)
+end
+
+world.baseDraw = 50000
+local violationsBefore = ceilingViolations
+runTicks(900)
+
+local t2 = world.fakeTurbines[2]
+check(math.abs(t2.rpm - 900) < 250,
+    string.format("per-turbine idleRPM override honored (turbine 2 at %.0f RPM)", t2.rpm))
+local othersNear = true
+for i, t in ipairs(world.fakeTurbines) do
+    if i ~= 2 then othersNear = othersNear and math.abs(t.rpm - IDLE) < 250 end
+end
+check(othersNear, "other turbines still ~1800 with interval+deadband active")
+check(rodWrites <= 300,
+    string.format("rod writes throttled by controlIntervalTicks (%d writes in 900 ticks)", rodWrites))
+check(ceilingViolations == violationsBefore, "no ceiling violations under throttled steering")
+
+-- Governor must still run on non-steering ticks (interval = 3).
+local victim2 = world.fakeTurbines[4]
+repeat tick = tick + 1 until tick % 3 ~= 0
+_G.__simClock = tick / 20
+world.step()
+victim2.rpm = CEILING + 5
+__test.runLoop(tick)
+check(victim2.cap == 0 and victim2.coils == true,
+    "safety governor runs full-rate between steering intervals")
+
+-- Restore defaults for the remaining tests.
+CONTROL_CONFIG.entityOverrides["BigReactors-Turbine_2"] = nil
+CONTROL_CONFIG.controlIntervalTicks = 1
+CONTROL_CONFIG.rpmDeadband = 0
+CONTROL_CONFIG.rodWriteThreshold = 0
+reactorBig.methods.setControlRodsLevels = origSetRods
+
+-- Settings-row buttons on the monitor drive the adjusters (1800 +100 clamps to 1850).
+local rpmPlus = mon.touch.buttonList["RPM+"]
+check(rpmPlus ~= nil, "settings buttons exist (RPM+)")
+if rpmPlus then
+    local before = CONTROL_CONFIG.idleRPM
+    mon:handleEvents({ "monitor_touch", mon.id, rpmPlus.xMin, rpmPlus.yMin })
+    check(CONTROL_CONFIG.idleRPM == math.min(before + 100, SAFE - 100),
+        "touching RPM+ raises idleRPM with safeRPM clamp")
+    CONTROL_CONFIG.idleRPM = before
+    ConfigUtil.writeConfig("control")
+end
+
+--endregion
+
 -- Detach/reattach shouldn't blow up.
 __test.handlePeripheralDetach("BigReactors-Turbine_5")
 tick = tick + 1; _G.__simClock = tick / 20

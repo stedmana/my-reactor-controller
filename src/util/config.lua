@@ -70,12 +70,21 @@ local function readConfig(configID)
     spread(overrides, configData)
 end
 
+-- Value equality that also works for table-valued config keys (compared by content,
+-- not identity - defaults read back from disk are never the same table object).
+local function valuesEqual(a, b)
+    if type(a) == "table" and type(b) == "table" then
+        return textutils.serialize(a) == textutils.serialize(b)
+    end
+    return a == b
+end
+
 local function writeConfig(configID)
     local configData = CONFIGS[configID]
     local defaults = readConfigDefaults(configID)
     local overrides = {}
     for key, value in pairs(configData) do
-        if configData[key] ~= defaults[key] then
+        if not valuesEqual(configData[key], defaults[key]) then
             overrides[key] = value
         end
     end

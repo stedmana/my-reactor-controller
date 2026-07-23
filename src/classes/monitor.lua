@@ -2,7 +2,7 @@
 -- header with global controls. Keeps the original bar-graph aesthetic; scales to any device
 -- count by paging when the grid overflows the screen.
 
-local HEADER_H = 6          -- rows reserved for the aggregate header + button row
+local HEADER_H = 8          -- rows reserved for the aggregate header + button + settings rows
 local CARD_W = 25           -- outer card width (incl. border)
 local CARD_H = 13           -- outer card height (incl. border)
 local GAP = 1               -- gap between cards
@@ -148,6 +148,8 @@ end
 local function drawTurbineCard(mon, ox, oy, turbine)
     local cfg = CONTROL_CONFIG
     local rpm = turbine.rpm or 0
+    -- Per-turbine target (entityOverrides), validated the same way the control law does.
+    local target = clampIdleRPM(getEntitySetting(turbine.id, "idleRPM"))
 
     local border = colors.green
     if rpm >= cfg.ceilingRPM then
@@ -165,8 +167,8 @@ local function drawTurbineCard(mon, ox, oy, turbine)
     drawText(mon, string.format("%5d RPM", math.floor(rpm + 0.5)), ox + CARD_W - 11, oy, colors.black, border)
 
     -- RPM gauge (the marquee visual).
-    drawRPMGauge(mon, ix, iy + 1, iw, rpm, cfg.idleRPM, cfg.safeRPM, cfg.ceilingRPM)
-    drawText(mon, "target " .. cfg.idleRPM .. "  max " .. cfg.ceilingRPM, ix, iy + 2, colors.black, colors.lightGray)
+    drawRPMGauge(mon, ix, iy + 1, iw, rpm, target, cfg.safeRPM, cfg.ceilingRPM)
+    drawText(mon, "target " .. target .. "  max " .. cfg.ceilingRPM, ix, iy + 2, colors.black, colors.lightGray)
 
     -- Power out.
     drawText(mon, "Power " .. fmt(turbine.averageEnergyProduced) .. " RF/t", ix, iy + 4, colors.black, colors.green)
@@ -179,7 +181,7 @@ local function drawTurbineCard(mon, ox, oy, turbine)
     if turbine.coilsEngaged then
         drawText(mon, "Coils: GENERATING", ix, iy + 7, colors.black, colors.lime)
     else
-        drawText(mon, "Coils: idle @1800", ix, iy + 7, colors.black, colors.lightGray)
+        drawText(mon, "Coils: idle @" .. target, ix, iy + 7, colors.black, colors.lightGray)
     end
 
     -- Own internal buffer = the demand signal.
@@ -211,6 +213,12 @@ local function drawHeader(mon, width, page, pages)
     if pages > 1 then
         drawText(mon, string.format("Page %d/%d", page, pages), width - 11, 3, colors.gray, colors.yellow)
     end
+
+    -- Settings row labels (the -/+ buttons underneath are added in handleResize).
+    local cfg = CONTROL_CONFIG
+    drawText(mon, string.format("RPM %d", cfg.idleRPM), 2, 6, colors.gray, colors.white)
+    drawText(mon, string.format("Buf %d-%d", cfg.bufferMin, cfg.bufferMax), 18, 6, colors.gray, colors.white)
+    drawText(mon, string.format("Coil %d-%d", cfg.coilsOnBelowPct, cfg.coilsOffAbovePct), 34, 6, colors.gray, colors.white)
 end
 
 --endregion
@@ -281,6 +289,16 @@ local Monitor = {
             self:tryAddButton("Next", function() self.page = self.page + 1 end,
                 w - 10, by, w - 2, by, colors.gray, colors.blue)
         end
+
+        -- Settings row (row 7): idleRPM, reactor buffer band, turbine coil band adjusters.
+        -- Current values are drawn on row 6 by drawHeader. Skipped on tiny monitors (pcall).
+        local sy = 7
+        self:tryAddButton("RPM-", function() adjustIdleRPM(-100) end, 2, sy, 8, sy, colors.gray, colors.blue)
+        self:tryAddButton("RPM+", function() adjustIdleRPM(100) end, 10, sy, 16, sy, colors.gray, colors.blue)
+        self:tryAddButton("Buf-", function() adjustBufferBand(-5) end, 18, sy, 24, sy, colors.gray, colors.blue)
+        self:tryAddButton("Buf+", function() adjustBufferBand(5) end, 26, sy, 32, sy, colors.gray, colors.blue)
+        self:tryAddButton("Coil-", function() adjustCoilBand(-5) end, 34, sy, 40, sy, colors.gray, colors.blue)
+        self:tryAddButton("Coil+", function() adjustCoilBand(5) end, 42, sy, 48, sy, colors.gray, colors.blue)
     end,
 
     updateButtonStates = function(self)

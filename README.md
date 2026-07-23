@@ -27,9 +27,11 @@ Uses the Extreme Reactors **Modernized Object API** (`getEnergyStats()`, `getFue
      holding 1800 needs full steam → max power at peak efficiency. Coils off → holding 1800 needs
      a trickle → spun-up standby with near-zero fuel burn.
 - **Monitor UI:** aggregate header + a card per reactor and per turbine (bar-graph style kept from
-  the original). Turbine cards feature an RPM gauge with the 1800 target line and 2000 redline.
-  Cards flow to the monitor size and page (Prev/Next) if they don't fit. Buttons: Auto, reactors
-  on/off, turbines on/off.
+  the original). Turbine cards feature an RPM gauge with the target line (per-turbine) and 2000
+  redline. Cards flow to the monitor size and page (Prev/Next) if they don't fit. Buttons: Auto,
+  reactors on/off, turbines on/off, plus a settings row (idleRPM, buffer band, coil band).
+- **Server-lag throttle:** steering can run every N ticks with deadbands on RPM error and rod
+  writes; the safety governor always runs at full tick rate.
 
 ## Install
 
@@ -66,7 +68,15 @@ to `/defaults/control.default.conf` with user changes in `/overrides/control.ove
 | `coilsOnBelowPct` / `coilsOffAbovePct` | 30 / 70 | Per-turbine demand hysteresis (%) |
 | `turbineKp` / `turbineKi` | 1.5 / 0.35 | Steam PI gains (mB/t per RPM of error) |
 | `steamWriteThreshold` | 5 | Min mB/t change before pushing a new flow cap |
+| `controlIntervalTicks` | 1 | Steering pass every N ticks (safety governor always full rate) |
+| `rpmDeadband` | 0 | Ignore steam-PI errors smaller than this (RPM) |
+| `rodWriteThreshold` | 0 | Min rod-level change (%-points) before writing new levels |
+| `entityOverrides` | `{}` | Per-peripheral overrides: reactors `bufferMin`/`bufferMax`, turbines `coilsOnBelowPct`/`coilsOffAbovePct`/`idleRPM` |
 | `secondsToAverage` | 0.5 | Rolling-average window for smoothed stats |
+
+The monitor's settings row adjusts `idleRPM` (±100, clamped to stay ≥100 RPM under `safeRPM`),
+the reactor buffer band, and the turbine coil band (±5% per side, min 10% width) live; changes
+persist to the overrides file.
 
 Per-reactor rod-PID gains live in [src/classes/reactor.lua](src/classes/reactor.lua)
 (`newExtremeReactor`); the stock gains are the upstream project's and behave sanely for large and

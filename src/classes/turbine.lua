@@ -115,9 +115,12 @@ local Turbine = {
     end,
 
     -- The three-step control law. Called once per tick in auto mode.
+    -- steer == false runs ONLY the safety governor (used between controlIntervalTicks
+    -- steering passes, so the responsiveness throttle can never slow the governor down).
     ---@param self Turbine
     ---@param config table CONTROL_CONFIG
-    updateControl = function(self, config)
+    ---@param steer boolean|nil nil/true = full pass, false = governor only
+    updateControl = function(self, config, steer)
         if not self.active then
             return
         end
@@ -127,7 +130,7 @@ local Turbine = {
         local rpm = self.rpm                 -- instantaneous for safety
         local avgRpm = self.averageRPM       -- smoothed for the PI
 
-        -- 1) SAFETY GOVERNOR -- highest priority, ignores the PI.
+        -- 1) SAFETY GOVERNOR -- highest priority, ignores the PI. Runs on every tick.
         if rpm >= config.ceilingRPM then
             self:writeSteam(0)
             self:writeCoils(true)            -- engage coils to brake
@@ -141,18 +144,31 @@ local Turbine = {
             return
         end
 
+        if steer == false then
+            return
+        end
+
+        -- Per-turbine overrides (entityOverrides), validated so idleRPM stays under safeRPM.
+        local coilsOnBelow = getEntitySetting(self.id, "coilsOnBelowPct")
+        local coilsOffAbove = getEntitySetting(self.id, "coilsOffAbovePct")
+        local idleTarget = clampIdleRPM(getEntitySetting(self.id, "idleRPM"))
+
         -- 2) COIL DEMAND -- hysteresis on this turbine's own internal buffer.
         local bufPct = self:bufferPct()
-        if bufPct <= config.coilsOnBelowPct then
+        if bufPct <= coilsOnBelow then
             self.desiredCoils = true
-        elseif bufPct >= config.coilsOffAbovePct then
+        elseif bufPct >= coilsOffAbove then
             self.desiredCoils = false
         end
         self:writeCoils(self.desiredCoils)
 
-        -- 3) STEAM PI -- hold idleRPM. Integral carries the (mode-dependent) steady-state steam,
-        --    so when coils flip the integral migrates to the new flow that holds 1800.
-        local err = config.idleRPM - avgRpm
+        -- 3) STEAM PI -- hold idleTarget. Integral carries the (mode-dependent) steady-state
+        --    steam, so when coils flip the integral migrates to the new flow that holds target.
+        --    Errors inside the deadband are ignored (server-lag reduction: fewer writes).
+        local err = idleTarget - avgRpm
+        if math.abs(err) < (config.rpmDeadband or 0) then
+            err = 0
+        end
         self.pid.integral = clamp(self.pid.integral + config.turbineKi * err, 0, self.flowMaxMax)
         local output = clamp(self.pid.integral + config.turbineKp * err, 0, self.flowMaxMax)
         self:writeSteam(output)
