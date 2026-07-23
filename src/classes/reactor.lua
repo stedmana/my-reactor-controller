@@ -215,9 +215,19 @@ local Reactor = {
 
         if self.activelyCooled then
             currentGenerationRate = self.averageSteamProductionRate
-            currentStoredAmount = _G.overallStats.storedSteam
-            capacity = _G.overallStats.steamCapacity
-            targetGenerationRate = _G.overallStats.steamConsumedPerReactor or _G.overallStats.steamConsumedLastTick
+            -- Steam network group this reactor belongs to (feature 3). Falls back to the
+            -- shared aggregate when groups aren't configured / not yet resolved.
+            local group = _G.overallStats.steamGroups and self.groupId
+                and _G.overallStats.steamGroups[self.groupId]
+            if group then
+                currentStoredAmount = group.storedSteam
+                capacity = group.steamCapacity
+                targetGenerationRate = group.consumedPerReactor
+            else
+                currentStoredAmount = _G.overallStats.storedSteam
+                capacity = _G.overallStats.steamCapacity
+                targetGenerationRate = _G.overallStats.steamConsumedPerReactor or _G.overallStats.steamConsumedLastTick
+            end
         end
 
         -- Nothing to regulate against yet (buffer not reported) -> hold rods, avoid divide-by-zero.

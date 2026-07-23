@@ -59,6 +59,22 @@ ceiling. Verified in the simulator including induced 1990/2005 RPM overspeed sta
 The governor also ignores `controlIntervalTicks`: when the steering pass is throttled to
 every N ticks (server-lag reduction), the governor still runs on every tick.
 
+**Flywheel mode** raises the governor's own thresholds. While `flywheelMode` is armed and a
+turbine is idle (coils not demanded), `ceiling`/`safe` become `flywheelCeilingRPM` and its
+soft-brake band, so the rotor may store energy above 2000 RPM. The moment coils are demanded
+the thresholds snap back to 2000/1950 and the governor brakes the overspeed off into the grid.
+The steam PI targets `flywheelRPM` only in the armed-idle state. This deliberately defeats the
+2000 RPM guarantee (in-game turbines can explode) — the simulator verifies the control logic,
+not the damage model.
+
+### Steam network groups
+
+`updateSteamGroups` resolves `CONTROL_CONFIG.steamGroups` into per-group aggregates
+(`overallStats.steamGroups[gid]` = summed turbine draw, group tank stored/capacity, reactor
+count → `consumedPerReactor`) and tags each reactor/turbine with a `.groupId`. Active reactors
+in `reactor:updateRods` chase their own group's numbers instead of the global aggregate.
+Unlisted entities share the `default` group, so an empty config is the original single network.
+
 ### Per-entity overrides + responsiveness
 
 `CONTROL_CONFIG.entityOverrides[peripheralID]` overrides selected globals per entity

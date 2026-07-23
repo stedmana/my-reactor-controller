@@ -32,6 +32,10 @@ Uses the Extreme Reactors **Modernized Object API** (`getEnergyStats()`, `getFue
   reactors on/off, turbines on/off, plus a settings row (idleRPM, buffer band, coil band).
 - **Server-lag throttle:** steering can run every N ticks with deadbands on RPM error and rod
   writes; the safety governor always runs at full tick rate.
+- **Steam network groups (optional):** map which reactors feed which turbines so each group
+  matches only its own steam demand; defaults to one shared network.
+- **Flywheel mode (optional, off by default):** spin idle turbines past 2000 RPM to bank
+  rotational energy for instant spike response — ⚠️ overspeed can destroy turbines in-game.
 
 ## Installing in Minecraft
 
@@ -77,7 +81,36 @@ to `/defaults/control.default.conf` with user changes in `/overrides/control.ove
 | `rpmDeadband` | 0 | Ignore steam-PI errors smaller than this (RPM) |
 | `rodWriteThreshold` | 0 | Min rod-level change (%-points) before writing new levels |
 | `entityOverrides` | `{}` | Per-peripheral overrides: reactors `bufferMin`/`bufferMax`, turbines `coilsOnBelowPct`/`coilsOffAbovePct`/`idleRPM` |
+| `steamGroups` | `{}` | Steam network groups (`{ reactors={ids}, turbines={ids} }`); empty = one shared network |
+| `flywheelMode` | `false` | Spin idle turbines to `flywheelRPM` for instant spike response (⚠️ overspeed — see below) |
+| `flywheelRPM` / `flywheelCeilingRPM` | 2500 / 2800 | Flywheel target and raised safety ceiling (RPM) |
 | `secondsToAverage` | 0.5 | Rolling-average window for smoothed stats |
+
+### Steam network groups
+
+By default every steam reactor feeds one shared network with every turbine. To split them,
+list groups in `steamGroups`; each group's reactors then match only that group's turbine steam
+draw:
+
+```lua
+steamGroups = {
+  { reactors = { "BigReactors-Reactor_2" }, turbines = { "BigReactors-Turbine_1", "BigReactors-Turbine_2" } },
+}
+```
+
+Anything not listed stays in the shared `default` group. Cards show a `G1`/`G2` badge when
+groups are active.
+
+### ⚠️ Flywheel mode (overspeed — off by default)
+
+The `Fly` button arms flywheel mode: **idle** turbines spin up to `flywheelRPM` (default 2500,
+above the normal 2000 ceiling) so a sudden power spike can be served instantly by engaging the
+coils and dumping the stored rotational energy. When coils engage the normal 2000 ceiling snaps
+back and the turbine brakes down through the band.
+
+**Running an ER2 turbine above 2000 RPM can make it EXPLODE.** This mode deliberately defeats
+the normal 2000 RPM safety guarantee, and the in-game high-RPM damage behavior is *not*
+verified — use it at your own risk. The header shows a red warning while armed.
 
 The monitor's settings row adjusts `idleRPM` (±100, clamped to stay ≥100 RPM under `safeRPM`),
 the reactor buffer band, the turbine coil band (±5% per side, min 10% width), and the steering

@@ -45,6 +45,14 @@ local function shortId(id)
     return tail or id
 end
 
+-- Steam-group badge ("G1", "G2", ...) for a card, or "" when groups aren't in use or the
+-- entity is in the implicit shared ("default") group.
+local function groupLabel(groupId)
+    if not _G.overallStats.hasSteamGroups then return "" end
+    if type(groupId) == "number" then return "G" .. groupId end
+    return ""
+end
+
 --region primitives
 
 local function drawText(mon, text, x, y, bg, fg)
@@ -100,6 +108,10 @@ local function drawReactorCard(mon, ox, oy, reactor)
     local steam = reactor.activelyCooled
     local border = steam and colors.cyan or colors.green
     local badge = steam and "STEAM" or "POWER"
+    if steam then
+        local gl = groupLabel(reactor.groupId)
+        if gl ~= "" then badge = badge .. " " .. gl end
+    end
 
     drawCardFrame(mon, ox, oy, border, "R " .. shortId(reactor.id) .. "  [" .. badge .. "]")
 
@@ -148,17 +160,35 @@ end
 local function drawTurbineCard(mon, ox, oy, turbine)
     local cfg = CONTROL_CONFIG
     local rpm = turbine.rpm or 0
-    -- Per-turbine target (entityOverrides), validated the same way the control law does.
-    local target = clampIdleRPM(getEntitySetting(turbine.id, "idleRPM"))
 
-    local border = colors.green
-    if rpm >= cfg.ceilingRPM then
-        border = colors.red
-    elseif rpm >= cfg.safeRPM then
-        border = colors.orange
+    -- Flywheel (feature 5): while armed AND idle the gauge rescales to flywheelCeilingRPM and
+    -- the target line jumps to flywheelRPM, matching the raised governor ceiling in the control
+    -- law. Otherwise the normal 1800/2000 gauge (per-turbine idleRPM override honored).
+    local armedIdle = (cfg.flywheelMode == true) and (turbine.desiredCoils == false)
+    local gaugeCeiling, gaugeSafe, target
+    if armedIdle then
+        gaugeCeiling = cfg.flywheelCeilingRPM
+        gaugeSafe = cfg.flywheelCeilingRPM - (cfg.ceilingRPM - cfg.safeRPM)
+        target = clampFlywheelRPM(cfg.flywheelRPM)
+    else
+        gaugeCeiling = cfg.ceilingRPM
+        gaugeSafe = cfg.safeRPM
+        target = clampIdleRPM(getEntitySetting(turbine.id, "idleRPM"))
     end
 
-    drawCardFrame(mon, ox, oy, border, "T " .. shortId(turbine.id))
+    local border = colors.green
+    if rpm >= gaugeCeiling then
+        border = colors.red
+    elseif rpm >= gaugeSafe then
+        border = colors.orange
+    elseif armedIdle then
+        border = colors.magenta
+    end
+
+    local title = "T " .. shortId(turbine.id)
+    local gl = groupLabel(turbine.groupId)
+    if gl ~= "" then title = title .. " [" .. gl .. "]" end
+    drawCardFrame(mon, ox, oy, border, title)
 
     local ix, iy, iw = ox + 1, oy + 1, CARD_W - 2
     local dot = turbine.active and colors.lime or colors.red
@@ -167,8 +197,8 @@ local function drawTurbineCard(mon, ox, oy, turbine)
     drawText(mon, string.format("%5d RPM", math.floor(rpm + 0.5)), ox + CARD_W - 11, oy, colors.black, border)
 
     -- RPM gauge (the marquee visual).
-    drawRPMGauge(mon, ix, iy + 1, iw, rpm, target, cfg.safeRPM, cfg.ceilingRPM)
-    drawText(mon, "target " .. target .. "  max " .. cfg.ceilingRPM, ix, iy + 2, colors.black, colors.lightGray)
+    drawRPMGauge(mon, ix, iy + 1, iw, rpm, target, gaugeSafe, gaugeCeiling)
+    drawText(mon, "target " .. target .. "  max " .. gaugeCeiling, ix, iy + 2, colors.black, colors.lightGray)
 
     -- Power out.
     drawText(mon, "Power " .. fmt(turbine.averageEnergyProduced) .. " RF/t", ix, iy + 4, colors.black, colors.green)
@@ -180,6 +210,8 @@ local function drawTurbineCard(mon, ox, oy, turbine)
     -- Coils state.
     if turbine.coilsEngaged then
         drawText(mon, "Coils: GENERATING", ix, iy + 7, colors.black, colors.lime)
+    elseif armedIdle then
+        drawText(mon, "FLYWHEEL  @" .. target, ix, iy + 7, colors.black, colors.magenta)
     else
         drawText(mon, "Coils: idle @" .. target, ix, iy + 7, colors.black, colors.lightGray)
     end
@@ -212,6 +244,11 @@ local function drawHeader(mon, width, page, pages)
 
     if pages > 1 then
         drawText(mon, string.format("Page %d/%d", page, pages), width - 11, 3, colors.gray, colors.yellow)
+    end
+
+    if CONTROL_CONFIG.flywheelMode then
+        drawText(mon, truncate("! FLYWHEEL ARMED - idle turbines exceed 2000 RPM, may EXPLODE !", width - 2),
+            2, 4, colors.gray, colors.red)
     end
 
     -- Settings row labels (the -/+ buttons underneath are added in handleResize).
@@ -283,6 +320,7 @@ local Monitor = {
             _G.turbinesOn = not _G.turbinesOn
             setTurbines(_G.turbinesOn)
         end, 22, by, 30, by, colors.red, colors.lime)
+        self:tryAddButton("Fly", function() toggleFlywheel() end, 32, by, 40, by, colors.gray, colors.magenta)
 
         if w >= 54 then
             self:tryAddButton("Prev", function() self.page = math.max(1, self.page - 1) end,
@@ -308,6 +346,7 @@ local Monitor = {
         if self.buttons["Auto"] then self.touch:setButton("Auto", CONTROL_CONFIG.autoMode) end
         if self.buttons["Rctrs"] then self.touch:setButton("Rctrs", _G.btnOn) end
         if self.buttons["Turbs"] then self.touch:setButton("Turbs", _G.turbinesOn ~= false) end
+        if self.buttons["Fly"] then self.touch:setButton("Fly", CONTROL_CONFIG.flywheelMode == true) end
     end,
 
     draw = function(self)

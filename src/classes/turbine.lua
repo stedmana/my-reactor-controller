@@ -130,13 +130,26 @@ local Turbine = {
         local rpm = self.rpm                 -- instantaneous for safety
         local avgRpm = self.averageRPM       -- smoothed for the PI
 
+        -- Flywheel mode (feature 5): while armed AND this turbine is idle (coils not demanded),
+        -- the governor ceiling is raised so the rotor can store energy at high RPM. The instant
+        -- power is needed (coils demanded) the normal 2000 ceiling snaps back and the governor
+        -- brakes the overspeed off into the grid. self.desiredCoils is the persisted demand
+        -- decision (also valid on governor-only ticks). DANGER: high RPM can explode turbines.
+        local flywheelArmedIdle = (config.flywheelMode == true) and (self.desiredCoils == false)
+        local ceiling = config.ceilingRPM
+        local safe = config.safeRPM
+        if flywheelArmedIdle then
+            ceiling = config.flywheelCeilingRPM
+            safe = config.flywheelCeilingRPM - (config.ceilingRPM - config.safeRPM)
+        end
+
         -- 1) SAFETY GOVERNOR -- highest priority, ignores the PI. Runs on every tick.
-        if rpm >= config.ceilingRPM then
+        if rpm >= ceiling then
             self:writeSteam(0)
             self:writeCoils(true)            -- engage coils to brake
             self.pid.integral = 0            -- so we don't slam back to full steam
             return
-        elseif rpm >= config.safeRPM then
+        elseif rpm >= safe then
             self:writeCoils(true)
             local capped = math.min(self.steamCap, self.flowMaxMax * 0.25)
             self:writeSteam(capped)
@@ -162,10 +175,14 @@ local Turbine = {
         end
         self:writeCoils(self.desiredCoils)
 
-        -- 3) STEAM PI -- hold idleTarget. Integral carries the (mode-dependent) steady-state
-        --    steam, so when coils flip the integral migrates to the new flow that holds target.
-        --    Errors inside the deadband are ignored (server-lag reduction: fewer writes).
-        local err = idleTarget - avgRpm
+        -- 3) STEAM PI -- hold the effective target. Idle + armed -> flywheelRPM (spin up the
+        --    reserve); generating (or disarmed) -> idleTarget (peak-efficiency 1800). Integral
+        --    carries the mode's steady-state steam. Deadband errors ignored (fewer writes).
+        local target = idleTarget
+        if config.flywheelMode == true and self.desiredCoils == false then
+            target = clampFlywheelRPM(config.flywheelRPM)
+        end
+        local err = target - avgRpm
         if math.abs(err) < (config.rpmDeadband or 0) then
             err = 0
         end

@@ -510,6 +510,98 @@ end
 
 --endregion
 
+--region feature 3: steam network groups
+
+-- Put the steam reactor in a group fed only by turbines 1 & 2; the other three turbines
+-- land in the implicit "default" group.
+CONTROL_CONFIG.steamGroups = {
+    { reactors = { "BigReactors-Reactor_2" }, turbines = { "BigReactors-Turbine_1", "BigReactors-Turbine_2" } },
+}
+world.baseDraw = 50000
+runTicks(200)
+
+local steamReactor = _G.reactors["BigReactors-Reactor_2"]
+check(steamReactor.groupId == 1, "steam reactor resolved into its configured group")
+check(_G.turbines["BigReactors-Turbine_1"].groupId == 1
+    and _G.turbines["BigReactors-Turbine_3"].groupId == "default",
+    "turbines split between group 1 and the default group")
+check(_G.overallStats.hasSteamGroups == true, "hasSteamGroups set when >1 group present")
+local g1 = _G.overallStats.steamGroups[1]
+local gDef = _G.overallStats.steamGroups["default"]
+check(g1 and g1.turbineCount == 2 and gDef and gDef.turbineCount == 3,
+    "per-group turbine counts correct (2 in group 1, 3 in default)")
+check(g1.consumption > 0 and reactorSteam.genLast > 0,
+    "group cascade active: reactor produces against its group's steam draw")
+
+CONTROL_CONFIG.steamGroups = {}
+runTicks(50)
+check(_G.overallStats.hasSteamGroups == false, "empty steamGroups falls back to one network")
+
+--endregion
+
+--region feature 5: flywheel mode
+
+-- Step helper that does NOT feed the global ceiling-violation counter (flywheel deliberately
+-- exceeds 2000 RPM, which is the whole point of the mode).
+local function stepOnly(n)
+    for _ = 1, n do
+        tick = tick + 1
+        _G.__simClock = tick / 20
+        world.step()
+        __test.runLoop(tick)
+    end
+end
+
+CONTROL_CONFIG.flywheelMode = true
+world.baseDraw = 0
+stepOnly(800)
+
+local anyOver2000, allUnderCeiling = false, true
+for _, t in ipairs(world.fakeTurbines) do
+    if t.rpm > CEILING then anyOver2000 = true end
+    if t.rpm > CONTROL_CONFIG.flywheelCeilingRPM + 60 then allUnderCeiling = false end
+end
+check(anyOver2000, "flywheel: idle turbines spin above 2000 RPM when armed")
+check(allUnderCeiling, "flywheel: overspeed still capped at flywheelCeilingRPM")
+
+-- Big spike: coils must engage and the overspeed must brake back under 2000.
+world.baseDraw = 300000
+stepOnly(600)
+local generating = false
+for _, t in ipairs(world.fakeTurbines) do
+    if t.coils and t.genLast > 0 then generating = true end
+end
+check(generating, "flywheel: coils engage to serve a power spike")
+local brakedBelowCeiling = true
+for _, t in ipairs(world.fakeTurbines) do
+    brakedBelowCeiling = brakedBelowCeiling and t.rpm < CEILING
+end
+check(brakedBelowCeiling, "flywheel: generating turbines brake back under 2000 RPM")
+
+-- Disarm: everything must settle back under safeRPM (normal governor fully restored).
+CONTROL_CONFIG.flywheelMode = false
+world.baseDraw = 0
+stepOnly(500)
+local backNormal = true
+for _, t in ipairs(world.fakeTurbines) do
+    backNormal = backNormal and t.rpm < SAFE
+end
+check(backNormal, "flywheel: turbines return under safeRPM after disarm")
+
+-- Fly button exists and toggles the mode.
+local flyBtn = mon.touch.buttonList["Fly"]
+check(flyBtn ~= nil, "Fly button exists")
+if flyBtn then
+    mon:handleEvents({ "monitor_touch", mon.id, flyBtn.xMin, flyBtn.yMin })
+    check(CONTROL_CONFIG.flywheelMode == true, "touching Fly arms flywheel mode")
+    mon:handleEvents({ "monitor_touch", mon.id, flyBtn.xMin, flyBtn.yMin })
+    check(CONTROL_CONFIG.flywheelMode == false, "touching Fly again disarms flywheel mode")
+end
+
+world.baseDraw = 0
+
+--endregion
+
 -- Detach/reattach shouldn't blow up.
 __test.handlePeripheralDetach("BigReactors-Turbine_5")
 tick = tick + 1; _G.__simClock = tick / 20

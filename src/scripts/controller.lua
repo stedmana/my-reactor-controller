@@ -49,6 +49,9 @@ _G.overallStats = {
     activeReactorCount = 0,
     turbineCount = 0,
 
+    steamGroups = {},        -- groupId -> per-group steam cascade stats (see updateSteamGroups)
+    hasSteamGroups = false,  -- true when >1 group is configured (UI shows group badges)
+
     efficiency = function()
         if _G.overallStats.fuelUsage <= 0 then return 0 end
         return _G.overallStats.totalRFT / _G.overallStats.fuelUsage
@@ -112,6 +115,71 @@ local function updateOverallStats()
 
     s.rfLostPerReactor = s.rfLost / math.max(1, s.passiveReactorCount)
     s.steamConsumedPerReactor = s.steamConsumedLastTick / math.max(1, s.activeReactorCount)
+
+    updateSteamGroups(s)
+end
+
+-- Resolve the configured steam groups into a membership lookup. Every reactor/turbine id not
+-- named in any group maps to the shared "default" group, so an empty steamGroups list keeps
+-- the original single-network behavior.
+---@return table reactorGroup id->groupId, table turbineGroup id->groupId
+local function resolveGroupMembership()
+    local reactorGroup, turbineGroup = {}, {}
+    local groups = CONTROL_CONFIG.steamGroups or {}
+    for i, group in ipairs(groups) do
+        for _, rid in ipairs(group.reactors or {}) do reactorGroup[rid] = i end
+        for _, tid in ipairs(group.turbines or {}) do turbineGroup[tid] = i end
+    end
+    return reactorGroup, turbineGroup
+end
+
+-- Per-group steam cascade. For each group, active reactors chase ONLY that group's turbine
+-- steam draw and band-seek on that group's own steam tanks. Results are stashed on
+-- overallStats so reactor:updateRods can read its group's numbers; each reactor/turbine also
+-- gets a .groupId for the UI. With no groups configured, everything lands in "default" and
+-- this reproduces the aggregate cascade exactly.
+---@param s OverallStats
+function updateSteamGroups(s)
+    local reactorGroup, turbineGroup = resolveGroupMembership()
+    local groups = {}
+
+    local function groupFor(id)
+        if not groups[id] then
+            groups[id] = { consumption = 0, storedSteam = 0, steamCapacity = 0, reactorCount = 0, turbineCount = 0 }
+        end
+        return groups[id]
+    end
+
+    for id, turbine in pairs(_G.turbines) do
+        local gid = turbineGroup[id] or "default"
+        turbine.groupId = gid
+        local g = groupFor(gid)
+        g.consumption = g.consumption + turbine.averageSteamFlow
+        g.turbineCount = g.turbineCount + 1
+    end
+
+    for id, reactor in pairs(_G.reactors) do
+        if reactor.activelyCooled then
+            local gid = reactorGroup[id] or "default"
+            reactor.groupId = gid
+            local g = groupFor(gid)
+            g.storedSteam = g.storedSteam + reactor.averageStoredSteam
+            g.steamCapacity = g.steamCapacity + reactor.steamCapacity
+            g.reactorCount = g.reactorCount + 1
+        else
+            reactor.groupId = nil
+        end
+    end
+
+    for _, g in pairs(groups) do
+        g.consumedPerReactor = g.consumption / math.max(1, g.reactorCount)
+    end
+
+    s.steamGroups = groups
+    -- More than one non-empty group means the UI should surface group ids on the cards.
+    local count = 0
+    for _ in pairs(groups) do count = count + 1 end
+    s.hasSteamGroups = (CONTROL_CONFIG.steamGroups ~= nil and #CONTROL_CONFIG.steamGroups > 0 and count > 1)
 end
 
 -- Keep the legacy globals the monitor/PID code reads in sync with the config band.
@@ -139,6 +207,19 @@ local IDLE_RPM_MARGIN = 100
 local IDLE_RPM_FLOOR = 100
 function _G.clampIdleRPM(rpm)
     return math.max(IDLE_RPM_FLOOR, math.min(rpm, CONTROL_CONFIG.safeRPM - IDLE_RPM_MARGIN))
+end
+
+-- Flywheel target must sit ABOVE the normal ceiling (that's the point) yet leave headroom
+-- under flywheelCeilingRPM so the flywheel soft-brake band has room to work.
+local FLYWHEEL_RPM_MARGIN = 100
+function _G.clampFlywheelRPM(rpm)
+    return math.max(CONTROL_CONFIG.ceilingRPM,
+        math.min(rpm, CONTROL_CONFIG.flywheelCeilingRPM - FLYWHEEL_RPM_MARGIN))
+end
+
+function _G.toggleFlywheel()
+    CONTROL_CONFIG.flywheelMode = not CONTROL_CONFIG.flywheelMode
+    ConfigUtil.writeConfig("control")
 end
 
 -- UI adjusters (monitor settings row). Each validates, persists, and re-syncs globals.

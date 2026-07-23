@@ -7,9 +7,9 @@ sketch how it fits the current architecture.
 | - | ------- | ---------- | ------ |
 | 1 | Configurable battery-reserve bands | Low | **Implemented** (2026-07) |
 | 2 | Responsiveness / server-lag throttle | Low | **Implemented** (2026-07) |
-| 3 | Reactor↔turbine steam network mapping | Medium | planned |
+| 3 | Reactor↔turbine steam network mapping | Medium | **Implemented** (2026-07) |
 | 4 | Configurable ideal RPM (e.g. 900) | Low | **Implemented** (2026-07) |
-| 5 | Flywheel mode (overspeed idle turbines) | Medium | planned |
+| 5 | Flywheel mode (overspeed idle turbines) | Medium | **Implemented** (2026-07) |
 | 6 | Efficiency calibration + optimize mode | High | planned |
 
 ---
@@ -38,19 +38,19 @@ turbine flow adjust less frequently to reduce the chance of lagging the server.
 - Safety governor still runs at full tick rate — only the *steering* slows down (verified in
   the simulator with an induced overspeed on a non-steering tick).
 
-## 3. Steam network mapping (reactor ↔ turbine groups)
+## 3. Steam network mapping (reactor ↔ turbine groups) — IMPLEMENTED
 
 Mark which reactors are connected to which turbines — or declare that all steam-producing
 reactors share one network with all turbines — so the script knows which reactors to adjust
 for changing steam production.
 
-- Today: single shared steam network assumed; all active reactors chase the aggregate
-  turbine draw (split evenly).
-- Planned: a `steamGroups` config mapping reactor peripheral names to turbine peripheral
-  names. Each group runs its own steam-match cascade (production target = that group's
-  turbine draw; band-seek on that group's tanks).
-- Default stays "one big network" when no groups are defined.
-- UI: show group id on reactor/turbine cards.
+- `CONTROL_CONFIG.steamGroups` is a list of `{ reactors = {...}, turbines = {...} }` by
+  peripheral id. Each group runs its own steam-match cascade: its active reactors chase only
+  that group's summed turbine steam draw and band-seek on that group's own steam tanks
+  (`controller.lua` `updateSteamGroups`; `reactor.lua` reads its group's numbers).
+- Any reactor/turbine not named in a group falls into the implicit `default` group, so an
+  empty list reproduces the original single-network behavior exactly.
+- UI: reactor/turbine cards show a `G1`/`G2` badge when more than one group is configured.
 
 ## 4. Configurable ideal RPM — IMPLEMENTED
 
@@ -62,19 +62,24 @@ Allow changing the "ideal" RPM target — e.g. 900 RPM instead of 1800.
 - Per-turbine targets via `entityOverrides` (e.g. `{ ["BigReactors-Turbine_2"] = { idleRPM = 900 } }`);
   the turbine-card gauge target line and "idle @N" text follow the effective per-turbine value.
 
-## 5. Flywheel mode (high-RPM idle spin-up) — **off by default**
+## 5. Flywheel mode (high-RPM idle spin-up) — IMPLEMENTED, **off by default**
 
 Toggle: idle turbines spin up to very high RPM so a big power spike can be served instantly
 by engaging the coils and burning off stored rotational energy.
 
-- Directly conflicts with the 2000 RPM safety ceiling, so this needs care:
-  - Separate `flywheelRPM` target and `flywheelCeilingRPM`, used **only** while the mode is
-    on and the turbine is idle (coils off).
-  - The moment coils engage (power needed), the normal governor rules resume as RPM falls
-    back through the normal band.
-  - Hard requirement before shipping: verify in-game what actually happens to an ER2 turbine
-    at high RPM (damage? efficiency cliff? nothing?) and document it.
-- UI: prominent indicator on the turbine card when flywheel mode is armed (gauge rescales).
+- Config: `flywheelMode` (off by default), `flywheelRPM` (2500), `flywheelCeilingRPM` (2800).
+- While armed AND a turbine is idle (coils disengaged), its steam PI targets `flywheelRPM`
+  and the safety governor's ceiling is raised to `flywheelCeilingRPM`. The instant coils are
+  demanded (power needed) the normal 2000 ceiling snaps back and the governor brakes the
+  overspeed off into the grid — exactly the "burn stored rotational energy" behavior.
+- Armed via the `Fly` header button (`toggleFlywheel`). `flywheelRPM` is clamped above
+  `ceilingRPM` and under `flywheelCeilingRPM` (`clampFlywheelRPM`).
+- UI: turbine gauge rescales to `flywheelCeilingRPM` with a magenta `FLYWHEEL @N` indicator;
+  the header shows a red armed/EXPLODE warning banner.
+- ⚠️ **Still unverified in-game:** running a turbine above 2000 RPM may damage or destroy it.
+  This mode deliberately defeats the normal 2000 RPM guarantee. Simulator confirms the control
+  logic (spin-up, ceiling cap, brake-on-demand, clean disarm) but NOT the in-game damage
+  model. Use at your own risk.
 
 ## 6. Efficiency measurement + optimize mode
 
