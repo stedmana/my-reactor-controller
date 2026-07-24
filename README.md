@@ -99,9 +99,16 @@ an efficiency curve (saved to `/state/<id>.state.conf`, reloaded on reboot). The
 the grid buffer is below its band (or a turbine is generating, for steam reactors), since it
 drops that reactor's output to zero mid-sweep.
 
-`Opt` toggles `optimizeMode`: **efficiency** never pulls a reactor's rods out past its measured
-sweet spot (trading peak output for fuel economy); **output** is the default demand-following
-behavior.
+`Opt` toggles `optimizeMode`: **efficiency** favors fuel economy; **output** is the default
+demand-following behavior.
+
+In efficiency mode, when every reactor in a pool (the passive reactors, or a steam group's
+reactors) is calibrated, the controller runs **merit-order dispatch**: it ranks them by measured
+RF-per-fuel and loads the most efficient ones first — at their sweet spot — while idling the
+rest, ramping the efficient reactors past their sweet spot only when demand exceeds what the
+sweet-spot points can supply. A parked reactor shows `Idled by efficiency` on its card. If a pool
+isn't fully calibrated it falls back to the per-reactor sweet-spot clamp (never over-drive past
+the measured sweet spot) and the even demand split.
 
 ### Steam network groups
 

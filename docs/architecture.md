@@ -119,8 +119,13 @@ One instance per reactor. `update()` reads all stats once per tick into rolling 
   sweep (0..100% in 5% steps, `calibrationSettleTicks` per step) builds an output-vs-fuel curve
   and the best-efficiency rod level, persisted to the state file and reloaded on connect. The
   controller steps an active sweep every tick and skips normal steering for that reactor.
-- **Optimize mode**: when `optimizeMode == "efficiency"`, `updateRods` clamps the rod level up to
-  `bestEffLevel` so the reactor never over-drives past its calibrated sweet spot.
+- **Optimize mode**: when `optimizeMode == "efficiency"`, the controller's `computeDispatch`
+  (merit order, `assignMeritOrder`) assigns each reactor a generation target — efficient reactors
+  loaded to their sweet spot first, the rest idled, ramped past sweet spot only on overload —
+  which `updateRods` chases instead of the even share. Applies to the passive pool and each steam
+  group's active pool. When a pool isn't fully calibrated (no dispatch target), `updateRods`
+  instead clamps the rod level up to `bestEffLevel` so a reactor never over-drives past its sweet
+  spot, and uses the even demand split.
 
 ### src/classes/turbine.lua
 One instance per turbine. `update()` mirrors the reactor pattern; `updateControl(config)` is

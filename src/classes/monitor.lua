@@ -151,10 +151,15 @@ local function drawReactorCard(mon, ox, oy, reactor)
         math.floor((reactor.averageCaseTemp or 0) + 0.5),
         math.floor((reactor.averageFuelTemp or 0) + 0.5)), ix, iy + 6, colors.black, colors.lightBlue)
 
-    -- Primary output (replaced by a calibration progress readout during a sweep).
+    -- Primary output (replaced by a calibration progress readout during a sweep, or an
+    -- idle notice when merit-order dispatch has parked this reactor for efficiency).
+    local dispatch = _G.overallStats.dispatchTargets
+    local dispatchTarget = dispatch and dispatch[reactor.id]
     if calProg then
         drawText(mon, string.format("Calibrating %3d%%", math.floor(calProg * 100 + 0.5)),
             ix, iy + 8, colors.black, colors.magenta)
+    elseif dispatchTarget ~= nil and dispatchTarget <= 0.5 then
+        drawText(mon, "Idled by efficiency", ix, iy + 8, colors.black, colors.lightBlue)
     elseif steam then
         drawText(mon, "Steam " .. string.format("%5d", math.floor(reactor.averageSteamProductionRate + 0.5)) .. " mB/t",
             ix, iy + 8, colors.black, colors.cyan)

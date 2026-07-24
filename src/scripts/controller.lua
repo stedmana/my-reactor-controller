@@ -51,6 +51,7 @@ _G.overallStats = {
 
     steamGroups = {},        -- groupId -> per-group steam cascade stats (see updateSteamGroups)
     hasSteamGroups = false,  -- true when >1 group is configured (UI shows group badges)
+    dispatchTargets = nil,   -- efficiency mode: reactorID -> assigned generation target (merit order)
 
     efficiency = function()
         if _G.overallStats.fuelUsage <= 0 then return 0 end
@@ -117,6 +118,7 @@ local function updateOverallStats()
     s.steamConsumedPerReactor = s.steamConsumedLastTick / math.max(1, s.activeReactorCount)
 
     updateSteamGroups(s)
+    computeDispatch(s)
 end
 
 -- Resolve the configured steam groups into a membership lookup. Every reactor/turbine id not
@@ -180,6 +182,88 @@ function updateSteamGroups(s)
     local count = 0
     for _ in pairs(groups) do count = count + 1 end
     s.hasSteamGroups = (CONTROL_CONFIG.steamGroups ~= nil and #CONTROL_CONFIG.steamGroups > 0 and count > 1)
+end
+
+-- Efficiency merit-order dispatch (feature: "crank the efficient reactors first").
+-- Max output a reactor can make (curve peak, ~rod 0) and its output at the best-efficiency point.
+local function reactorMaxOut(reactor)
+    local m = 0
+    for _, point in pairs(reactor.curve) do
+        if point.out and point.out > m then m = point.out end
+    end
+    return m
+end
+local function reactorSweetOut(reactor)
+    local point = reactor.curve[reactor.bestEffLevel]
+    return point and point.out or 0
+end
+
+-- Allocate `demand` across a pool of same-mode reactors, most fuel-efficient first, writing each
+-- reactor's assigned generation target into `targets[id]`. Two passes: (1) load reactors at their
+-- best-efficiency output in merit order until demand is met (extras stay idle); (2) if demand
+-- still isn't met, ramp the already-loaded reactors past their sweet spot toward max output, again
+-- most-efficient first. Does nothing (falls back to the even split) unless EVERY reactor in the
+-- pool is calibrated, so behavior is predictable.
+local function assignMeritOrder(pool, demand, targets)
+    if #pool == 0 then return end
+    for _, r in ipairs(pool) do
+        if not r.curve or r.bestEff == nil or r.bestEffLevel == nil or not r.curve[r.bestEffLevel] then
+            return
+        end
+    end
+    table.sort(pool, function(a, b) return (a.bestEff or 0) > (b.bestEff or 0) end)
+
+    local remaining = math.max(0, demand or 0)
+    for _, r in ipairs(pool) do
+        local give = math.min(remaining, reactorSweetOut(r))
+        r._dispatch = give
+        remaining = remaining - give
+    end
+    if remaining > 0 then
+        for _, r in ipairs(pool) do
+            local headroom = math.max(0, reactorMaxOut(r) - r._dispatch)
+            local extra = math.min(remaining, headroom)
+            r._dispatch = r._dispatch + extra
+            remaining = remaining - extra
+            if remaining <= 0 then break end
+        end
+    end
+    for _, r in ipairs(pool) do
+        targets[r.id] = r._dispatch
+        r._dispatch = nil
+    end
+end
+
+-- Build per-reactor dispatch targets for efficiency mode: the passive reactors share the grid
+-- drain, and each steam group's active reactors share that group's steam draw. Left nil in output
+-- mode (reactors fall back to the even per-reactor split in reactor:updateRods).
+---@param s OverallStats
+function computeDispatch(s)
+    s.dispatchTargets = nil
+    if CONTROL_CONFIG.optimizeMode ~= "efficiency" then return end
+
+    local targets = {}
+
+    local passives = {}
+    local groups = {}
+    for _, reactor in pairs(_G.reactors) do
+        if reactor.activelyCooled then
+            local gid = reactor.groupId or "default"
+            groups[gid] = groups[gid] or {}
+            table.insert(groups[gid], reactor)
+        else
+            passives[#passives + 1] = reactor
+        end
+    end
+
+    assignMeritOrder(passives, s.rfLost, targets)
+    for gid, pool in pairs(groups) do
+        local gstats = s.steamGroups[gid]
+        local demand = gstats and gstats.consumption or s.steamConsumedLastTick
+        assignMeritOrder(pool, demand, targets)
+    end
+
+    if next(targets) then s.dispatchTargets = targets end
 end
 
 -- Keep the legacy globals the monitor/PID code reads in sync with the config band.
@@ -519,6 +603,8 @@ _G.__test = {
     handlePeripheralAttach = handlePeripheralAttach,
     handlePeripheralDetach = handlePeripheralDetach,
     syncConfigGlobals = syncConfigGlobals,
+    assignMeritOrder = assignMeritOrder,
+    computeDispatch = computeDispatch,
 }
 
 --Entry point

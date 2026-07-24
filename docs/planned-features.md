@@ -102,6 +102,14 @@ Measure each setup's efficiency and add a setting to choose between **maximize e
   active reactors, if any turbine is generating), since the sweep drops that reactor's output to
   zero partway through.
 
+- **Merit-order dispatch** (`controller.lua` `assignMeritOrder`/`computeDispatch`): in efficiency
+  mode, when a whole pool is calibrated, the controller ranks reactors by measured RF-per-fuel and
+  assigns each a generation target — efficient reactors loaded to their sweet spot first, the rest
+  idled, and the efficient ones ramped past sweet spot only on overload. Reactors chase the
+  assigned target instead of the even per-reactor split; a parked reactor shows `Idled by
+  efficiency`. Applies to the passive pool and, per steam group, the active pool. Falls back to
+  the per-reactor sweet-spot clamp + even split when a pool isn't fully calibrated.
+
 Not yet done (future refinement): per-turbine fuel attribution through the steam network
 (RF/t out per fuel B/t of its group's reactors) for a turbine-level efficiency readout, and
 automatic re-calibration as fuel reactivity/fertility drifts.

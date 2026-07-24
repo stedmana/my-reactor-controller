@@ -682,6 +682,64 @@ ConfigUtil.writeConfig("control")
 
 --endregion
 
+--region efficiency merit-order dispatch
+
+-- Unit tests on the allocator: A is more efficient (bestEff 200) than B (100). Sweet-spot
+-- outputs 100/80, max outputs 300/200.
+local function mkR(id, bestEff, sweetOut, maxOut)
+    return { id = id, bestEff = bestEff, bestEffLevel = 60,
+        curve = { [60] = { out = sweetOut }, [0] = { out = maxOut } } }
+end
+
+local t = {}
+__test.assignMeritOrder({ mkR("A", 200, 100, 300), mkR("B", 100, 80, 200) }, 90, t)
+check(t.A == 90 and t.B == 0, "dispatch: light load -> only the efficient reactor runs, other idled")
+
+t = {}
+__test.assignMeritOrder({ mkR("A", 200, 100, 300), mkR("B", 100, 80, 200) }, 150, t)
+check(t.A == 100 and t.B == 50, "dispatch: A held at sweet spot, B picks up the remainder")
+
+t = {}
+__test.assignMeritOrder({ mkR("A", 200, 100, 300), mkR("B", 100, 80, 200) }, 400, t)
+check(t.A == 300 and t.B == 100, "dispatch: overload ramps the efficient reactor to max first")
+
+t = {}
+__test.assignMeritOrder({ { id = "C" }, mkR("D", 100, 80, 200) }, 100, t)
+check(next(t) == nil, "dispatch: falls back (no targets) when a reactor is uncalibrated")
+
+-- Integration: give both passive reactors curves, and only in efficiency mode should the
+-- controller publish per-reactor dispatch targets.
+_G.reactors["BigReactors-Reactor_0"].curve = { [60] = { out = 40000 }, [0] = { out = 60000 } }
+_G.reactors["BigReactors-Reactor_0"].bestEff = 250
+_G.reactors["BigReactors-Reactor_0"].bestEffLevel = 60
+_G.reactors["BigReactors-Reactor_1"].curve = { [60] = { out = 20000 }, [0] = { out = 30000 } }
+_G.reactors["BigReactors-Reactor_1"].bestEff = 150
+_G.reactors["BigReactors-Reactor_1"].bestEffLevel = 60
+
+CONTROL_CONFIG.optimizeMode = "output"
+world.baseDraw = 30000
+runTicks(50)
+check(_G.overallStats.dispatchTargets == nil, "dispatch: no targets published in output mode")
+
+CONTROL_CONFIG.optimizeMode = "efficiency"
+runTicks(50)
+local dt = _G.overallStats.dispatchTargets
+check(dt ~= nil and dt["BigReactors-Reactor_0"] ~= nil and dt["BigReactors-Reactor_1"] ~= nil,
+    "dispatch: per-reactor targets published in efficiency mode")
+check((dt["BigReactors-Reactor_0"] or 0) >= (dt["BigReactors-Reactor_1"] or 0),
+    "dispatch: more of the load assigned to the more efficient reactor")
+
+-- Restore defaults.
+CONTROL_CONFIG.optimizeMode = "output"
+_G.reactors["BigReactors-Reactor_0"].curve = nil
+_G.reactors["BigReactors-Reactor_0"].bestEffLevel = nil
+_G.reactors["BigReactors-Reactor_1"].curve = nil
+_G.reactors["BigReactors-Reactor_1"].bestEffLevel = nil
+world.baseDraw = 0
+ConfigUtil.writeConfig("control")
+
+--endregion
+
 -- Detach/reattach shouldn't blow up.
 __test.handlePeripheralDetach("BigReactors-Turbine_5")
 tick = tick + 1; _G.__simClock = tick / 20

@@ -237,6 +237,15 @@ local Reactor = {
             end
         end
 
+        -- Efficiency merit-order dispatch: when the controller has assigned this reactor a target
+        -- (efficiency mode, pool fully calibrated), chase that instead of the even per-reactor
+        -- share. The assignment already encodes "run the efficient reactors, idle the rest".
+        local dispatch = _G.overallStats.dispatchTargets
+        local hasDispatch = dispatch and dispatch[self.id] ~= nil
+        if hasDispatch then
+            targetGenerationRate = dispatch[self.id]
+        end
+
         -- Nothing to regulate against yet (buffer not reported) -> hold rods, avoid divide-by-zero.
         if not capacity or capacity <= 0 then
             return
@@ -273,11 +282,10 @@ local Reactor = {
         local combinedError = W_RFT * errorRFT + W_RF * errorRF
         local rftRodLevel = iteratePID(self.pid, combinedError)
 
-        -- Optimize-efficiency mode (feature 6): never pull rods OUT past the calibrated
-        -- best-efficiency point. Higher rod level = deeper insertion = the reactor refuses to
-        -- over-drive for extra output, trading peak output for fuel efficiency. Producing less
-        -- is never a safety concern, so this only ever clamps the level upward.
-        if CONTROL_CONFIG.optimizeMode == "efficiency" and self.bestEffLevel then
+        -- Optimize-efficiency fallback (uncalibrated pool, no dispatch target): never pull rods
+        -- OUT past the calibrated best-efficiency point, trading peak output for fuel efficiency.
+        -- When merit-order dispatch is active its target already encodes this, so skip the clamp.
+        if CONTROL_CONFIG.optimizeMode == "efficiency" and not hasDispatch and self.bestEffLevel then
             rftRodLevel = math.max(rftRodLevel, self.bestEffLevel)
         end
 
