@@ -138,12 +138,16 @@ battery, per turbine buffer, and per generic `energy_storage` peripheral. The la
 deltas are what make the `rfLost` derivation work.
 
 ### src/classes/monitor.lua
-Card-grid UI. Header (aggregates + Auto/Rctrs/Turbs/Fly/Opt/Calib/Prev/Next buttons via
-Touchpoint, plus a settings row: idleRPM ±100, buffer band ±5%/side, coil band ±5%/side,
-control-interval ±1 — all persisted, plus optimize-mode label), then one card per reactor (mode
-badge, group badge, buffer/rod bars with sweet-spot, temps, output or calibration progress) and
-per turbine (RPM gauge — rescales for flywheel — power, steam in/cap, coil/flywheel state,
-own-buffer bar).
+Card-grid UI. Header: aggregate text rows + a verbose current-settings line, then bordered,
+verbose-labelled buttons (Auto Control, Reactors/Turbines On/Off, Flywheel Mode, Optimize Mode,
+Calibrate Reactor Efficiency, Previous/Next Page, then a row of Lower/Raise Target RPM, Narrow/
+Widen Buffer Band, Narrow/Widen Coil Band, Faster/Slower Response). Buttons flow to fit the width
+and wrap; each is 3 rows tall with a drawn white outline (`buttonLabel` builds the verbose display
+text while keeping the short Touchpoint key so state updates/tests still address it by name). The
+header height is computed from how many button rows result. Then one card per reactor (mode badge,
+group badge, buffer/rod bars with best-eff level, temps, output or calibration progress) and per
+turbine (RPM gauge — rescales for flywheel — power, steam in/cap, coil/flywheel state, own-buffer
+bar).
 Layout flows to monitor size (0.5 text scale) and pages on overflow. Buttons are added with
 `pcall` so small monitors degrade instead of erroring. Rendering goes through an off-screen
 `window` (`setVisible(false)` … `(true)`) to avoid flicker.
